@@ -1,0 +1,31 @@
+# Secrets
+.env
+
+# Local SQLite (created at runtime)
+data/options.db
+data/options.db-*
+
+# Worker PID file
+data/worker.pid
+
+# Option chain snapshots (large; generated at runtime)
+data/snapshots/*.ndjson
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+.envrc
+
+# Test / tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
