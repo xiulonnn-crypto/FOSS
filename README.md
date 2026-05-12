@@ -6,11 +6,43 @@
 
 设计与范围以 **[设计规格](docs/superpowers/specs/2026-05-12-us-option-trading-assistant-design.md)** 为准。
 
-## 运行（实施阶段提供）
+## 快速开始
 
-- Web：`http://127.0.0.1:7000`（Flask `server.py`）
-- Worker：内部 `http://127.0.0.1:7001`（`/reload`、`/healthz`）
-- 一键：`python3 run.py`（待实现）
+```bash
+python3 run.py          # 安装依赖 → 初始化 DB → 起 worker → 起 server → 自动开浏览器
+SKIP_INSTALL=1 python3 run.py  # 已安装时跳过 pip，加速启动
+```
+
+macOS 可双击 `启动期权助手.command`。
+
+| 进程 | 访问地址 |
+|------|---------|
+| server（主 UI & API） | http://127.0.0.1:7000 |
+| worker（内部管理） | http://127.0.0.1:7001 |
+
+## API 端点速览
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 读取配置 |
+| POST | `/api/settings` | 更新配置（自动触发 worker 热加载） |
+| GET/POST | `/api/watchlist` | 观察名单 |
+| POST | `/api/scan/run` | 手动触发筛选 |
+| GET | `/api/scan/latest` | 最新候选合约 |
+| GET/POST | `/api/positions` | 持仓列表 / 新建 |
+| POST | `/api/positions/{id}/close` | 平仓 |
+| GET | `/api/positions/{id}/radar` | 雷达历史 |
+| GET | `/api/events` | 事件列表 |
+| PUT | `/api/events/{id}/ack` | 已读单条事件 |
+| GET | `/api/events/stream` | SSE 实时推送 |
+| GET | `/api/review/summary` | 复盘四指标 + 出场原因分组 |
+| GET | `/api/review/positions.csv` | 导出持仓 CSV |
+
+## 测试
+
+```bash
+python3 -m pytest tests/ -v
+```
 
 ## 文档五件套
 
