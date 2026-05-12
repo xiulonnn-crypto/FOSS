@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>期权卖方助手</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    [x-cloak] { display: none; }
+    .nav-link { @apply px-4 py-2 rounded text-sm font-medium transition-colors; }
+    .nav-link.active { @apply bg-indigo-600 text-white; }
+    .nav-link:not(.active) { @apply text-gray-300 hover:bg-gray-700; }
+    .badge-warn { @apply bg-yellow-500 text-black text-xs px-2 py-0.5 rounded-full; }
+    .badge-danger { @apply bg-red-500 text-white text-xs px-2 py-0.5 rounded-full; }
+    .badge-info { @apply bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full; }
+    .toast { @apply fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm; }
+    .toast-item { @apply rounded-lg shadow-lg p-3 text-sm text-white flex items-start gap-2; }
+    .toast-warn { @apply bg-yellow-600; }
+    .toast-danger { @apply bg-red-600; }
+    .toast-info { @apply bg-blue-600; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center gap-4 flex-shrink-0">
+    <span class="font-bold text-indigo-400 text-lg">期权卖方助手</span>
+    <span id="provider-badge" class="text-xs text-gray-400 border border-gray-600 rounded px-2 py-0.5">yfinance ≈15min</span>
+    <!-- SSE status -->
+    <span class="flex items-center gap-1 text-xs ml-2">
+      <span id="sse-dot" class="w-2 h-2 rounded-full bg-gray-500"></span>
+      <span id="sse-label" class="text-gray-400">连接中</span>
+    </span>
+
+    <!-- Nav links -->
+    <nav class="flex gap-1 ml-4">
+      <a href="#screener" class="nav-link" data-page="screener">筛选</a>
+      <a href="#positions" class="nav-link" data-page="positions">持仓</a>
+      <a href="#review" class="nav-link" data-page="review">复盘</a>
+      <a href="#settings" class="nav-link" data-page="settings">设置</a>
+    </nav>
+
+    <!-- Bell / Event dropdown -->
+    <div class="ml-auto relative" id="bell-container">
+      <button id="bell-btn" class="relative p-2 rounded hover:bg-gray-700 focus:outline-none">
+        <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M15 17h5l-1.405-2.808A4.992 4.992 0 0018 9V7a6 6 0 00-12 0v2a4.992 4.992 0 00-.595 5.192L4 17h5m6 0a3 3 0 01-6 0"/>
+        </svg>
+        <span id="bell-count" class="absolute -top-1 -right-1 hidden bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center"></span>
+      </button>
+      <!-- Event dropdown -->
+      <div id="bell-dropdown" class="hidden absolute right-0 mt-1 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-40 max-h-96 overflow-y-auto">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+          <span class="text-sm font-medium">事件通知</span>
+          <button id="mark-all-read" class="text-xs text-indigo-400 hover:text-indigo-300">全部已读</button>
+        </div>
+        <ul id="bell-list" class="divide-y divide-gray-700"></ul>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toast container -->
+  <div class="toast" id="toast-container"></div>
+
+  <!-- Page content -->
+  <main class="flex-1 p-6 overflow-auto">
+    <!-- #screener -->
+    <section id="page-screener" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-indigo-300">标的筛选</h2>
+        <button id="btn-scan" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium">
+          立即扫描
+        </button>
+      </div>
+      <!-- Watchlist input -->
+      <div class="bg-gray-800 rounded-lg p-4 space-y-2">
+        <label class="text-sm text-gray-400">观察名单（逗号分隔）</label>
+        <div class="flex gap-2">
+          <input id="watchlist-input" type="text" placeholder="AAPL,TSLA,NVDA..."
+            class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+          <button id="btn-save-watchlist" class="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm">保存</button>
+        </div>
+      </div>
+      <!-- Candidates table -->
+      <div class="bg-gray-800 rounded-lg overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-700 text-gray-300 text-xs uppercase">
+            <tr>
+              <th class="px-3 py-2 text-left">标的</th>
+              <th class="px-3 py-2">到期日</th>
+              <th class="px-3 py-2">行权价</th>
+              <th class="px-3 py-2">Mid</th>
+              <th class="px-3 py-2">Δ</th>
+              <th class="px-3 py-2">DTE</th>
+              <th class="px-3 py-2">IV%</th>
+              <th class="px-3 py-2">IV排名</th>
+              <th class="px-3 py-2">年化ROI</th>
+              <th class="px-3 py-2">POP%</th>
+              <th class="px-3 py-2">价差%</th>
+              <th class="px-3 py-2">安全垫%</th>
+              <th class="px-3 py-2">评分</th>
+              <th class="px-3 py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody id="candidates-tbody" class="divide-y divide-gray-700"></tbody>
+        </table>
+        <div id="candidates-empty" class="text-center text-gray-500 py-10 text-sm">
+          暂无候选合约，点击「立即扫描」开始筛选
+        </div>
+      </div>
+    </section>
+
+    <!-- #positions -->
+    <section id="page-positions" class="hidden space-y-4">
+      <h2 class="text-xl font-semibold text-indigo-300">持仓雷达</h2>
+      <div id="positions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      <div id="positions-empty" class="text-center text-gray-500 py-10 text-sm hidden">
+        暂无持仓，在筛选页确认入场后将显示在此
+      </div>
+    </section>
+
+    <!-- #review -->
+    <section id="page-review" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-indigo-300">策略复盘</h2>
+        <a id="btn-export-csv" href="/api/review/positions.csv" class="text-xs text-indigo-400 border border-indigo-700 rounded px-3 py-1 hover:bg-indigo-900">导出 CSV</a>
+      </div>
+      <!-- Summary cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="review-summary"></div>
+      <!-- Close reason breakdown -->
+      <div class="bg-gray-800 rounded-lg p-4" id="review-breakdown">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">按出场原因</h3>
+        <table class="w-full text-sm">
+          <thead class="text-xs text-gray-400 uppercase">
+            <tr>
+              <th class="text-left pb-2">原因</th>
+              <th class="pb-2">次数</th>
+              <th class="pb-2">胜率</th>
+              <th class="pb-2">平均年化</th>
+            </tr>
+          </thead>
+          <tbody id="breakdown-tbody" class="divide-y divide-gray-700"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- #settings -->
+    <section id="page-settings" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-indigo-300">系统设置</h2>
+        <button id="btn-save-settings" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium">
+          保存
+        </button>
+      </div>
+      <div class="bg-yellow-900/30 border border-yellow-700 rounded px-4 py-2 text-xs text-yellow-400">
+        数据源：yfinance（非专业实时，约延迟 15 分钟）。IV 排名为已实现波动率代理指标。
+      </div>
+      <div id="settings-form" class="space-y-4"></div>
+    </section>
+  </main>
+
+  <!-- Entry modal for position -->
+  <div id="entry-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div class="bg-gray-800 rounded-xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+      <h3 class="text-lg font-semibold">确认入场</h3>
+      <div id="modal-info" class="text-sm text-gray-300 space-y-1"></div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-400">成交 Mid</label>
+          <input id="modal-premium" type="number" step="0.01" class="w-full mt-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-400">张数</label>
+          <input id="modal-contracts" type="number" min="1" value="1" class="w-full mt-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-400">备注（可选）</label>
+          <input id="modal-notes" type="text" class="w-full mt-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm" />
+        </div>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button id="modal-cancel" class="px-4 py-2 rounded text-sm bg-gray-700 hover:bg-gray-600">取消</button>
+        <button id="modal-confirm" class="px-4 py-2 rounded text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-medium">确认入场</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
