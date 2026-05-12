@@ -1,0 +1,39 @@
+{
+  "filters": {
+    "delta_min": 0.1,
+    "delta_max": 0.2,
+    "dte_min": 30,
+    "dte_max": 45,
+    "annualized_roi_min": 0.2,
+    "spread_pct_max": 0.1,
+    "iv_rank_min": 50,
+    "margin_buffer_min": 0.1,
+    "min_open_interest": 50,
+    "exclude_earnings_within_days": 7
+  },
+  "exits": {
+    "take_profit_pct": 0.5,
+    "take_profit_strong_pct": 0.75,
+    "time_warning_dte": 14,
+    "time_danger_dte": 7,
+    "danger_distance_pct": 0.03,
+    "delta_breach_abs": 0.4
+  },
+  "scoring_weights": {
+    "annualized_roi": 0.35,
+    "iv_rank": 0.25,
+    "spread_pct": 0.15,
+    "margin_buffer": 0.15,
+    "open_interest": 0.1
+  },
+  "schedule": {
+    "screener_minutes": 15,
+    "radar_minutes": 15,
+    "settlement_time_et": "16:30",
+    "iv_refresh_time_et": "17:00"
+  },
+  "provider": "yfinance",
+  "fees": {"usd_per_contract": 1.0},
+  "risk_free_rate": 0.045,
+  "rv_by_symbol": {}
+}
