@@ -46,6 +46,9 @@ def create_app(db_path: Path = DB_PATH) -> Flask:
     app.register_blueprint(bp_scan)
     app.register_blueprint(bp_positions)
 
+    from app.api.routes_review import bp_review
+    app.register_blueprint(bp_review)
+
     # Serve frontend static files
     @app.route("/")
     def index():
