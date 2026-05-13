@@ -765,7 +765,7 @@ async function loadReview() {
       const pnlTxt = pnlNum == null ? '-' : '$' + pnlNum.toFixed(0);
       const note = (p.notes != null && String(p.notes).trim() !== '') ? String(p.notes) : '—';
       return `
-    <tr class="text-xs cursor-pointer hover:bg-gray-750" onclick="openAttrDrawer(${p.id}, '${(p.symbol||'').replace(/'/g,"\\'")} ${p.expiration || ''} $${fmt(p.strike,0)} Put')">
+    <tr class="text-xs cursor-pointer hover:bg-gray-700/50" onclick="openAttrDrawer(${p.id}, '${(p.symbol||'').replace(/'/g,"\\'")} ${p.expiration || ''} $${fmt(p.strike,0)} Put')">
       <td class="text-left py-1.5 font-medium text-gray-200">${p.symbol ?? '-'}</td>
       <td class="text-left py-1.5 text-gray-300">${p.expiration ?? '-'}</td>
       <td class="text-right py-1.5 text-gray-300">${fmt(p.strike, 2)}</td>
