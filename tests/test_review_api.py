@@ -40,8 +40,8 @@ def client_with_data(tmp_path):
     p2_id = repo.insert_position(_pos("TSLA", 200.0, 3.0, 1.5, "CLOSED_EARLY", "take_profit_50", 148.0))
     repo.close_position(p2_id, "CLOSED_EARLY", 1.5, "take_profit_50", 148.0)
 
-    p3_id = repo.insert_position(_pos("MSFT", 350.0, 4.0, 6.0, "ASSIGNED", "assigned", -201.0))
-    repo.close_position(p3_id, "ASSIGNED", 6.0, "assigned", -201.0)
+    p3_id = repo.insert_position(_pos("MSFT", 350.0, 4.0, 6.0, "ASSIGNED", "assigned", -202.0))
+    repo.close_position(p3_id, "ASSIGNED", 6.0, "assigned", -202.0)
 
     with app.test_client() as c:
         yield c
@@ -54,10 +54,27 @@ def test_review_summary_returns_correct_trade_count(client_with_data):
     assert data["trade_count"] == 3
 
 
+def test_review_summary_includes_closed_positions(client_with_data):
+    resp = client_with_data.get("/api/review/summary")
+    data = resp.get_json()
+    cp = data.get("closed_positions")
+    assert isinstance(cp, list)
+    assert len(cp) == 3
+    symbols = {r["symbol"] for r in cp}
+    assert symbols == {"AAPL", "TSLA", "MSFT"}
+
+
+def test_review_summary_total_realized_pnl(client_with_data):
+    resp = client_with_data.get("/api/review/summary")
+    data = resp.get_json()
+    # 199 + 148 - 202
+    assert data["total_realized_pnl"] == pytest.approx(145.0)
+
+
 def test_review_summary_win_rate(client_with_data):
     resp = client_with_data.get("/api/review/summary")
     data = resp.get_json()
-    # 2 wins (AAPL +199, TSLA +148), 1 loss (MSFT -201)
+    # 2 wins (AAPL +199, TSLA +148), 1 loss (MSFT -202)
     assert abs(data["win_rate"] - 2/3) < 0.01
 
 
@@ -80,6 +97,20 @@ def test_review_csv_download(client_with_data):
     assert "TSLA" in text
 
 
+def test_review_closed_positions_list(client_with_data):
+    resp = client_with_data.get("/api/review/closed_positions")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "positions" in data
+    rows = data["positions"]
+    assert len(rows) == 3
+    symbols = {r["symbol"] for r in rows}
+    assert symbols == {"AAPL", "TSLA", "MSFT"}
+    for r in rows:
+        assert r["state"] in ("EXPIRED_OTM", "CLOSED_EARLY", "ASSIGNED")
+        assert r.get("close_at")
+
+
 def test_review_summary_empty(tmp_path):
     db_path = tmp_path / "empty.db"
     init_database(db_path)
@@ -91,3 +122,9 @@ def test_review_summary_empty(tmp_path):
         data = resp.get_json()
         assert data["trade_count"] == 0
         assert data["win_rate"] is None
+        assert data.get("total_realized_pnl") is None
+        assert data.get("closed_positions") == []
+
+        r2 = c.get("/api/review/closed_positions")
+        assert r2.status_code == 200
+        assert r2.get_json()["positions"] == []

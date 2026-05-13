@@ -18,6 +18,12 @@ def init_database(db_path: Path) -> None:
         if row is None:
             defaults = _DEFAULTS.read_text()
             con.execute("INSERT INTO settings(key, value) VALUES (?, ?)", ("app", defaults))
+        # Add open_snapshot column if not exists (migration for existing DBs)
+        try:
+            con.execute("ALTER TABLE positions ADD COLUMN open_snapshot TEXT")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
         con.commit()
     finally:
         con.close()

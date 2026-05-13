@@ -6,9 +6,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.symbols import normalize_ticker_symbol
+
 
 def _now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _watchlist_entry_enabled(w: Dict[str, Any]) -> bool:
+    """True if symbol should participate in scan/jobs.
+
+    SQLite may store NULL in enabled in legacy rows; dict.get("enabled", 1) still
+    returns None when the key exists with a NULL value, excluding the symbol — treat
+    None as enabled.
+    """
+    v = w.get("enabled")
+    if v is None:
+        return True
+    try:
+        return int(v) != 0
+    except (TypeError, ValueError):
+        return bool(v)
 
 
 class Repo:
@@ -62,14 +80,30 @@ class Repo:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_enabled_watchlist_symbols(self) -> List[str]:
+        """Symbols included in scans (enabled≠0; NULL/missing counts as enabled)."""
+        return [w["symbol"] for w in self.list_watchlist() if _watchlist_entry_enabled(w)]
+
     def upsert_symbols(self, symbols: List[str]) -> None:
+        """Replace the active watchlist: only these symbols stay enabled.
+
+        Symbols omitted from ``symbols`` are set to enabled=0 (history rows kept).
+        """
         now = _now_utc()
+        wanted = list(
+            dict.fromkeys(
+                norm
+                for norm in (normalize_ticker_symbol(s) for s in symbols)
+                if norm
+            )
+        )
         with self._connect() as con:
-            for sym in symbols:
+            con.execute("UPDATE watchlist SET enabled=0")
+            for sym in wanted:
                 con.execute(
-                    "INSERT INTO watchlist(symbol, added_at) VALUES(?, ?) "
-                    "ON CONFLICT(symbol) DO NOTHING",
-                    (sym.upper().strip(), now),
+                    "INSERT INTO watchlist(symbol, added_at, enabled) VALUES(?, ?, 1) "
+                    "ON CONFLICT(symbol) DO UPDATE SET enabled=1",
+                    (sym, now),
                 )
 
     def set_earnings(self, symbol: str, earnings_at: Optional[str]) -> None:
@@ -132,6 +166,14 @@ class Repo:
                 f"INSERT INTO candidates({col_str}) VALUES({placeholders})",
                 [[row.get(c) for c in columns] for row in rows],
             )
+
+    def count_candidates(self, scan_run_id: int) -> int:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT COUNT(*) AS n FROM candidates WHERE scan_run_id=?",
+                (scan_run_id,),
+            ).fetchone()
+            return int(row["n"]) if row is not None else 0
 
     def list_candidates(self, scan_run_id: int, limit: int = 20) -> List[Dict]:
         with self._connect() as con:
@@ -208,6 +250,52 @@ class Repo:
                 f"INSERT INTO radar_snapshots({col_str}) VALUES({placeholders})",
                 [snap.get(c) for c in columns],
             )
+
+    def get_candidate_by_id(self, candidate_id: int) -> Optional[Dict]:
+        """Return a single candidate row by primary key."""
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM candidates WHERE id=?", (candidate_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_mae_mfe_for_positions(self, position_ids: List[int]) -> Dict[int, Dict]:
+        """
+        For each position_id, compute MAE (min pnl_pct) and MFE (max pnl_pct)
+        from radar_snapshots. Returns {position_id: {"mae": float, "mfe": float}}.
+        """
+        if not position_ids:
+            return {}
+        placeholders = ",".join("?" * len(position_ids))
+        with self._connect() as con:
+            rows = con.execute(
+                f"SELECT position_id, MIN(pnl_pct) AS mae, MAX(pnl_pct) AS mfe "
+                f"FROM radar_snapshots WHERE position_id IN ({placeholders}) "
+                f"GROUP BY position_id",
+                position_ids,
+            ).fetchall()
+        return {row["position_id"]: {"mae": row["mae"], "mfe": row["mfe"]} for row in rows}
+
+    def save_open_snapshot(self, position_id: int, snapshot: Dict[str, Any]) -> None:
+        """Persist the entry environment snapshot for a position."""
+        with self._connect() as con:
+            con.execute(
+                "UPDATE positions SET open_snapshot=? WHERE id=?",
+                (json.dumps(snapshot, ensure_ascii=False), position_id),
+            )
+
+    def get_open_snapshot(self, position_id: int) -> Optional[Dict]:
+        """Return the parsed open_snapshot dict for a position, or None."""
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT open_snapshot FROM positions WHERE id=?", (position_id,)
+            ).fetchone()
+        if row is None or row["open_snapshot"] is None:
+            return None
+        try:
+            return json.loads(row["open_snapshot"])
+        except (json.JSONDecodeError, TypeError):
+            return None
 
     def list_radar_snapshots(self, position_id: int, limit: int = 100) -> List[Dict]:
         with self._connect() as con:
