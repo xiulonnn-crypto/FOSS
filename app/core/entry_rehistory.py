@@ -141,8 +141,10 @@ def recalculate_closed_position_insights(
     if strike <= 0 or open_premium <= 0:
         raise ValueError("strike and open_premium must be positive")
 
-    if open_d >= exp_d:
-        raise ValueError("open date on or after expiration")
+    # Same calendar day as expiration is valid (0-DTE / expiry-day entry); only
+    # strictly-after-expiry dates are inconsistent with a live option position.
+    if open_d > exp_d:
+        raise ValueError("open date after expiration")
 
     dte_entry = max((exp_d - open_d).days, 1)
     t_entry = max(dte_entry / 365.0, 1e-6)
