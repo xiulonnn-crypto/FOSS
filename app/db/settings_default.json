@@ -2,18 +2,24 @@
   "filters": {
     "delta_min": 0.1,
     "delta_max": 0.2,
-    "dte_min": 30,
-    "dte_max": 45,
-    "annualized_roi_min": 0.2,
-    "spread_pct_max": 0.1,
-    "iv_rank_min": 50,
-    "margin_buffer_min": 0.1,
-    "min_open_interest": 50,
+    "dte_min": 21,
+    "dte_max": 60,
+    "annualized_roi_min": 0.12,
+    "spread_pct_max": 0.15,
+    "iv_rank_min": 0,
+    "margin_buffer_min": 0.08,
+    "min_open_interest": 10,
     "exclude_earnings_within_days": 7
   },
   "exits": {
     "take_profit_pct": 0.5,
     "take_profit_strong_pct": 0.75,
+    "fast_profit_days": 5,
+    "fast_profit_pct": 0.5,
+    "loss_pnl_pct_warn": -0.5,
+    "loss_pnl_pct_danger": -1.0,
+    "expiry_hold_max_mid": 0.05,
+    "expiry_hold_min_margin_buffer": 0.05,
     "time_warning_dte": 14,
     "time_danger_dte": 7,
     "danger_distance_pct": 0.03,
@@ -27,12 +33,15 @@
     "open_interest": 0.1
   },
   "schedule": {
-    "screener_minutes": 15,
+    "screener_minutes": 0,
     "radar_minutes": 15,
     "settlement_time_et": "16:30",
     "iv_refresh_time_et": "17:00"
   },
   "provider": "yfinance",
+  "integrations": {
+    "massive_enrich_closed": 0
+  },
   "fees": {"usd_per_contract": 1.0},
   "risk_free_rate": 0.045,
   "rv_by_symbol": {}
