@@ -3,13 +3,18 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from flask import Flask, jsonify, request
 
 from app.db.init_db import init_database
+from app.db.paths import options_db_path
 from app.db.repo import Repo
 from app.jobs.scheduler_config import build_scheduler, register_jobs
+from app.jobs.job_screener import run_option_pool_maintenance
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,7 +22,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("worker")
 
-DB_PATH = Path("data/options.db")
+DB_PATH = options_db_path()
 WORKER_HOST = "127.0.0.1"
 WORKER_PORT = 7001
 
@@ -58,6 +63,12 @@ def main():
     _repo = Repo(DB_PATH)
 
     # Build and start scheduler
+    try:
+        result = run_option_pool_maintenance(_repo)
+        log.info("worker: option pool maintenance completed: %s", result)
+    except Exception as exc:
+        log.warning("worker: option pool maintenance skipped: %s", exc)
+
     _scheduler = build_scheduler(_repo)
     register_jobs(_scheduler, _repo)
     _scheduler.start()

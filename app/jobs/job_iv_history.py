@@ -18,7 +18,7 @@ def run_iv_history(
     Stores annualised RV values (last 252 data points) into settings.rv_by_symbol.
     """
     settings = repo.get_settings()
-    watchlist = [w["symbol"] for w in repo.list_watchlist() if w.get("enabled", 1)]
+    watchlist = repo.list_enabled_watchlist_symbols()
 
     rv_by_symbol = settings.get("rv_by_symbol", {})
     updated = 0

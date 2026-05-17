@@ -13,8 +13,12 @@ from app.data.provider_base import MarketDataProvider
 
 log = logging.getLogger(__name__)
 
-# strike range filter: spot ± this fraction
+# strike range filter: spot ± this fraction (screener/radar payload size)
 _STRIKE_RANGE = 0.30
+# When ``anchor_strike`` is set (e.g. marking an open position), keep strikes
+# within this absolute band around the anchor so far OTM CSPs are not dropped.
+_ANCHOR_BAND_ABS_MIN = 15.0
+_ANCHOR_BAND_FRAC = 0.03  # 3% of anchor strike, e.g. ±$14.4 @ K=480 → ±$15 floor
 # max retries on yfinance throttle
 _MAX_RETRIES = 3
 
@@ -61,6 +65,9 @@ class YFinanceProvider(MarketDataProvider):
         symbol: str,
         expiration: date,
         right: str = "P",
+        anchor_strike: Optional[float] = None,
+        *,
+        underlying_spot: Optional[float] = None,
     ) -> List[OptionContract]:
         exp_str = expiration.strftime("%Y-%m-%d")
         for attempt in range(_MAX_RETRIES):
@@ -78,11 +85,13 @@ class YFinanceProvider(MarketDataProvider):
         if df is None or df.empty:
             return []
 
-        # get spot for range filter
-        try:
-            spot = self.get_quote(symbol).spot
-        except Exception:
-            spot = None
+        # get spot for range filter (reuse quote when caller already has it)
+        spot = underlying_spot
+        if spot is None:
+            try:
+                spot = float(self.get_quote(symbol).spot)
+            except Exception:
+                spot = None
 
         today = date.today()
         dte = (expiration - today).days
@@ -91,10 +100,14 @@ class YFinanceProvider(MarketDataProvider):
             strike = float(row.get("strike", 0) or 0)
             if strike <= 0:
                 continue
-            # strike range filter
-            if spot is not None:
-                if abs(strike - spot) / spot > _STRIKE_RANGE:
-                    continue
+            # strike range filter; optional anchor includes position strike far from spot
+            near_spot = spot is None or abs(strike - spot) / spot <= _STRIKE_RANGE
+            near_anchor = False
+            if anchor_strike is not None:
+                band = max(_ANCHOR_BAND_ABS_MIN, anchor_strike * _ANCHOR_BAND_FRAC)
+                near_anchor = abs(strike - anchor_strike) <= band
+            if not (near_spot or near_anchor):
+                continue
             # DTE range (broad pre-filter: 1–120 days)
             if dte < 1 or dte > 120:
                 continue

@@ -19,7 +19,9 @@ class TradierProvider(MarketDataProvider):
     def get_expirations(self, symbol: str):
         raise NotImplementedError
 
-    def get_option_chain(self, symbol, expiration, right="P"):
+    def get_option_chain(
+        self, symbol, expiration, right="P", anchor_strike=None, *, underlying_spot=None
+    ):
         raise NotImplementedError
 
     def get_historical_close(self, symbol, day):

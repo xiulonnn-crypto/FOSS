@@ -87,6 +87,26 @@ def test_get_option_chain_filters_wide_strikes(mock_ticker_cls):
 
 
 @patch("app.data.provider_yfinance.yf.Ticker")
+def test_get_option_chain_anchor_keeps_far_otm_strike(mock_ticker_cls):
+    """Deep OTM strikes outside spot±30% must remain fetchable for position marks."""
+    exp = date.today() + timedelta(days=35)
+    mock_chain = MagicMock()
+    mock_chain.puts = _make_puts_df(100.0)
+
+    mock_ticker = MagicMock()
+    mock_ticker.option_chain.return_value = mock_chain
+    mock_ticker.fast_info.last_price = 100.0
+    mock_ticker_cls.return_value = mock_ticker
+
+    provider = YFinanceProvider()
+    contracts = provider.get_option_chain("AAPL", exp, right="P", anchor_strike=60.0)
+
+    strikes = [c.strike for c in contracts]
+    assert 90.0 in strikes
+    assert 60.0 in strikes
+
+
+@patch("app.data.provider_yfinance.yf.Ticker")
 def test_get_option_chain_missing_bid_ask(mock_ticker_cls):
     exp = date.today() + timedelta(days=35)
     df = pd.DataFrame(

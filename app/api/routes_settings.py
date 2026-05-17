@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
-import urllib.request
-import urllib.error
 import json
+import re
+import unicodedata
+import urllib.error
+import urllib.request
 
 from flask import Blueprint, current_app, jsonify, request
 
+from app.core.symbols import normalize_ticker_symbol
 from app.db.repo import Repo
 
 log = logging.getLogger(__name__)
@@ -51,7 +54,12 @@ def post_watchlist():
     repo: Repo = current_app.config["REPO"]
     data = request.get_json(silent=True) or {}
     raw = data.get("symbols", "")
-    import re
-    symbols = [s.strip().upper() for s in re.split(r"[,，\s]+", raw) if s.strip()]
+    raw_norm = unicodedata.normalize("NFKC", raw or "")
+    symbols = [
+        normalize_ticker_symbol(part)
+        for part in re.split(r"[,，\s]+", raw_norm)
+        if part.strip()
+    ]
+    symbols = list(dict.fromkeys(s for s in symbols if s))
     repo.upsert_symbols(symbols)
     return jsonify(repo.list_watchlist())

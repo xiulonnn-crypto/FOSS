@@ -5,7 +5,7 @@ from typing import List
 
 import pytest
 
-from app.core.strategy import evaluate_exit_signals, score_csp_candidates
+from app.core.strategy import derive_csp_candidate_row, evaluate_exit_signals, score_csp_candidates
 from app.core.types import OptionContract, Quote
 
 
@@ -69,6 +69,32 @@ SETTINGS = {
 }
 
 QUOTE = Quote(symbol="AAPL", spot=175.0, asof=__import__("datetime").datetime.utcnow(), iv_rank=65.0)
+
+
+# ------------------------------------------------------------------
+# derive_csp_candidate_row — informational row without scan filters
+# ------------------------------------------------------------------
+
+def test_derive_matches_filtered_row_when_contract_passes():
+    c = _make_contract()
+    filtered = score_csp_candidates([c], QUOTE, SETTINGS)[0]
+    formatted = derive_csp_candidate_row(c, QUOTE, SETTINGS)
+    assert formatted is not None
+    assert formatted["strike"] == filtered["strike"]
+    assert abs(formatted["score"] - filtered["score"]) < 1e-8
+
+
+def test_derive_returns_row_when_contract_blocked_by_filters():
+    c = _make_contract(dte_offset=12)
+    assert len(score_csp_candidates([c], QUOTE, SETTINGS)) == 0
+    row = derive_csp_candidate_row(c, QUOTE, SETTINGS)
+    assert row is not None
+    assert row["dte"] == 12
+
+
+def test_derive_returns_none_when_no_valid_quotes():
+    c = _make_contract(bid=0.0, ask=1.6)
+    assert derive_csp_candidate_row(c, QUOTE, SETTINGS) is None
 
 
 # ------------------------------------------------------------------

@@ -40,12 +40,24 @@ def test_full_credit_at_expiry():
 
 
 def test_early_close_50_pct():
-    # Opened for 2.00, closed at 1.00 (50% profit), 2 contracts
-    pnl = calc_realized_pnl(open_premium=2.0, close_premium=1.0, contracts=2, fee_per_contract=1.0)
-    assert pnl == (2.0 - 1.0) * 100 * 2 - 2.0  # 198.0
+    # Opened for 2.00, closed at 1.00 (50% profit), 2 contracts; open + close commissions
+    pnl = calc_realized_pnl(
+        open_premium=2.0,
+        close_premium=1.0,
+        contracts=2,
+        fee_per_contract=1.0,
+        fee_legs=2,
+    )
+    assert pnl == (2.0 - 1.0) * 100 * 2 - 4.0  # 196.0
 
 
 def test_loss_on_assigned():
-    # Opened for 2.00, assigned — buy back at intrinsic, say 5.00
-    pnl = calc_realized_pnl(open_premium=2.0, close_premium=5.0, contracts=1, fee_per_contract=1.0)
-    assert pnl == (2.0 - 5.0) * 100 - 1.0  # -301.0
+    # Opened for 2.00, assigned — close at intrinsic 5.00; open + close (assignment) commissions
+    pnl = calc_realized_pnl(
+        open_premium=2.0,
+        close_premium=5.0,
+        contracts=1,
+        fee_per_contract=1.0,
+        fee_legs=2,
+    )
+    assert pnl == (2.0 - 5.0) * 100 - 2.0  # -302.0

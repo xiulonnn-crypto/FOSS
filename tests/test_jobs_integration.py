@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -39,7 +39,15 @@ class FakeProvider(MarketDataProvider):
     def get_expirations(self, symbol: str) -> List[date]:
         return [date.today() + timedelta(days=35)]
 
-    def get_option_chain(self, symbol, expiration, right="P") -> List[OptionContract]:
+    def get_option_chain(
+        self,
+        symbol,
+        expiration,
+        right="P",
+        anchor_strike=None,
+        *,
+        underlying_spot=None,
+    ) -> List[OptionContract]:
         return [
             OptionContract(
                 symbol=symbol,
@@ -86,6 +94,22 @@ def repo(tmp_path):
 # job_screener
 # ------------------------------------------------------------------
 
+def test_screener_preallocated_run_id(repo, tmp_path, monkeypatch):
+    """Manual path: reuse existing scan_run row instead of inserting another."""
+    monkeypatch.chdir(tmp_path)
+    rid = repo.insert_scan_run(provider="fake", trigger="manual", symbol_count=1)
+    provider = FakeProvider()
+    run_screener(repo, provider, trigger="manual", run_id=rid)
+    import sqlite3
+
+    con = sqlite3.connect(str(tmp_path / "test.db"))
+    n_runs = con.execute("SELECT COUNT(*) FROM scan_runs").fetchone()[0]
+    last_id = con.execute("SELECT id FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    con.close()
+    assert n_runs == 1
+    assert last_id == rid
+
+
 def test_screener_writes_candidates(repo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     provider = FakeProvider()
@@ -97,6 +121,36 @@ def test_screener_writes_candidates(repo, tmp_path, monkeypatch):
     events = repo.list_unread_events()
     screener_events = [e for e in events if e["category"] == "screener"]
     assert len(screener_events) >= 1
+
+
+def test_screener_insert_failure_reports_zero_db_and_danger_event(
+    repo, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    provider = FakeProvider()
+    with patch.object(Repo, "insert_candidates", side_effect=RuntimeError("boom")):
+        run_screener(repo, provider, trigger="test")
+
+    import sqlite3
+
+    db = str(tmp_path / "test.db")
+    con = sqlite3.connect(db)
+    rid = con.execute("SELECT id FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    cand_count = con.execute(
+        "SELECT candidate_count FROM scan_runs WHERE id=?", (rid,)
+    ).fetchone()[0]
+    persisted = con.execute(
+        "SELECT COUNT(*) FROM candidates WHERE scan_run_id=?", (rid,)
+    ).fetchone()[0]
+    con.close()
+    assert cand_count == 0
+    assert persisted == 0
+
+    screener_titles = [
+        e["title"] for e in repo.list_events(limit=20) if e["category"] == "screener"
+    ]
+    assert len(screener_titles) == 1
+    assert "未能写入数据库" in screener_titles[0]
 
 
 # ------------------------------------------------------------------
@@ -146,6 +200,11 @@ def test_settlement_otm(repo, tmp_path, monkeypatch):
     pos = repo.get_position(pos_id)
     assert pos["state"] == "EXPIRED_OTM"
     assert pos["close_reason"] == "expired_otm"
+    assert float(pos["realized_pnl"]) == pytest.approx(2.0 * 100 - 1.0)
+    snaps = repo.list_radar_snapshots(pos_id)
+    assert len(snaps) == 1
+    assert snaps[0]["spot"] == pytest.approx(175.0)
+    assert snaps[0]["current_mid"] == pytest.approx(0.0)
 
 
 def test_settlement_assigned(repo, tmp_path, monkeypatch):
@@ -166,3 +225,9 @@ def test_settlement_assigned(repo, tmp_path, monkeypatch):
     pos = repo.get_position(pos_id)
     assert pos["state"] == "ASSIGNED"
     assert pos["close_reason"] == "assigned"
+    # intrinsic = strike - spot = 25; open + assignment option legs: 2 × fee
+    assert float(pos["realized_pnl"]) == pytest.approx((2.0 - 25.0) * 100 - 2.0)
+    snaps = repo.list_radar_snapshots(pos_id)
+    assert len(snaps) == 1
+    assert snaps[0]["spot"] == pytest.approx(175.0)
+    assert snaps[0]["current_mid"] == pytest.approx(25.0)

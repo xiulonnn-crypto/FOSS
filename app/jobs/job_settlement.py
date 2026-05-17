@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
+from app.core.radar_snapshot import append_radar_snapshot_from_mark
 from app.core.settlement import calc_realized_pnl, settle_short_put
+from app.core.time_et import APP_TZ
 from app.data.provider_base import MarketDataProvider
 from app.db.repo import Repo
 
@@ -49,20 +51,62 @@ def run_settlement(
             close_premium = 0.0
             state = "EXPIRED_OTM"
             close_reason = "expired_otm"
+            fee_legs = 1
         else:
             # assigned: intrinsic value
             close_premium = max(0.0, strike - spot_close)
             state = "ASSIGNED"
             close_reason = "assigned"
+            fee_legs = 2
 
-        pnl = calc_realized_pnl(open_premium, close_premium, contracts, fee_per_contract)
-        repo.close_position(pos["id"], state, close_premium, close_reason, pnl)
+        pnl = calc_realized_pnl(
+            open_premium, close_premium, contracts, fee_per_contract, fee_legs=fee_legs
+        )
+
+        close_dt = datetime.combine(exp_date, time(16, 0), tzinfo=APP_TZ)
+        close_ts = close_dt.astimezone(timezone.utc).isoformat()
+
+        try:
+            open_pf = float(open_premium)
+            mb = (
+                (spot_close - strike) / spot_close
+                if spot_close > 0 and strike > 0
+                else 0.0
+            )
+            cp_f = float(close_premium)
+            pnl_pct_mark = (1.0 - (cp_f / open_pf)) if open_pf > 0 else 0.0
+            mark = {
+                "spot": float(spot_close),
+                "option_mid": cp_f,
+                "pnl_pct": float(pnl_pct_mark),
+                "margin_buffer": float(mb),
+                "delta": None,
+            }
+            append_radar_snapshot_from_mark(
+                repo, pos["id"], close_ts, mark, signals=None
+            )
+        except Exception as exc:
+            log.warning(
+                "settlement: radar snapshot failed (non-fatal) position_id=%s: %s",
+                pos["id"],
+                exc,
+            )
+
+        repo.close_position(
+            pos["id"], state, close_premium, close_reason, pnl, close_at=close_ts
+        )
 
         level = "info" if outcome == "expired_otm" else "warn"
+        if outcome == "expired_otm":
+            title = (
+                f"{symbol} 到期结算：虚值未指派 · 收盘 {spot_close:.2f} · 行权 {strike:.2f}"
+            )
+        else:
+            title = f"{symbol} 到期结算：已指派 · 收盘 {spot_close:.2f} · 行权 {strike:.2f}"
         eid = repo.insert_event(
             level=level,
             category="settlement",
-            title=f"{symbol} {state}: spot={spot_close:.2f} strike={strike:.2f}",
+            title=title,
             payload={
                 "position_id": pos["id"],
                 "outcome": outcome,

@@ -48,6 +48,46 @@ def test_merge_settings_partial(repo):
     assert "dte_min" in result["filters"]
 
 
+def test_upsert_reenables_disabled_watchlist_symbol(repo):
+    """Saving watchlist must flip enabled=1 so scans see the symbol."""
+    now = "2026-05-01T10:00:00+00:00"
+    with repo._connect() as con:
+        con.execute(
+            "INSERT INTO watchlist(symbol, added_at, enabled) VALUES(?,?,0)",
+            ("AAPL", now),
+        )
+    assert repo.list_enabled_watchlist_symbols() == []
+    repo.upsert_symbols(["AAPL"])
+    assert repo.list_enabled_watchlist_symbols() == ["AAPL"]
+    row = next(r for r in repo.list_watchlist() if r["symbol"] == "AAPL")
+    assert row["enabled"] == 1
+
+
+def test_upsert_symbols_disables_symbols_not_in_payload(repo):
+    """Saving a narrowed watchlist must disable removed tickers (not leave them active)."""
+    repo.upsert_symbols(["AAPL", "TSLA", "NVDA"])
+    assert set(repo.list_enabled_watchlist_symbols()) == {"AAPL", "NVDA", "TSLA"}
+    repo.upsert_symbols(["AAPL"])
+    assert repo.list_enabled_watchlist_symbols() == ["AAPL"]
+    disabled = {r["symbol"]: r["enabled"] for r in repo.list_watchlist()}
+    assert disabled["AAPL"] == 1
+    assert disabled["TSLA"] == 0
+    assert disabled["NVDA"] == 0
+
+
+def test_upsert_symbols_empty_disables_all(repo):
+    repo.upsert_symbols(["QQQ"])
+    assert repo.list_enabled_watchlist_symbols() == ["QQQ"]
+    repo.upsert_symbols([])
+    assert repo.list_enabled_watchlist_symbols() == []
+
+
+def test_upsert_normalizes_fullwidth_mu(repo):
+    repo.upsert_symbols(["ＭＵ"])
+    assert repo.list_enabled_watchlist_symbols() == ["MU"]
+    assert not any(r["symbol"] == "ＭＵ" for r in repo.list_watchlist())
+
+
 # ------------------------------------------------------------------
 # Scan runs & candidates
 # ------------------------------------------------------------------

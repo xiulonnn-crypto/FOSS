@@ -23,6 +23,9 @@ class MarketDataProvider:
         symbol: str,
         expiration: date,
         right: str = "P",
+        anchor_strike: Optional[float] = None,
+        *,
+        underlying_spot: Optional[float] = None,
     ) -> List[OptionContract]:
         raise NotImplementedError
 
