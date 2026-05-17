@@ -66,22 +66,23 @@ def run_settlement(
         close_dt = datetime.combine(exp_date, time(16, 0), tzinfo=APP_TZ)
         close_ts = close_dt.astimezone(timezone.utc).isoformat()
 
+        open_pf = float(open_premium)
+        cp_f = float(close_premium)
+        mb = (
+            (spot_close - strike) / spot_close
+            if spot_close > 0 and strike > 0
+            else 0.0
+        )
+        pnl_pct_mark = (1.0 - (cp_f / open_pf)) if open_pf > 0 else 0.0
+        mark: Optional[dict] = {
+            "spot": float(spot_close),
+            "option_mid": cp_f,
+            "pnl_pct": float(pnl_pct_mark),
+            "margin_buffer": float(mb),
+            "delta": None,
+        }
+
         try:
-            open_pf = float(open_premium)
-            mb = (
-                (spot_close - strike) / spot_close
-                if spot_close > 0 and strike > 0
-                else 0.0
-            )
-            cp_f = float(close_premium)
-            pnl_pct_mark = (1.0 - (cp_f / open_pf)) if open_pf > 0 else 0.0
-            mark = {
-                "spot": float(spot_close),
-                "option_mid": cp_f,
-                "pnl_pct": float(pnl_pct_mark),
-                "margin_buffer": float(mb),
-                "delta": None,
-            }
             append_radar_snapshot_from_mark(
                 repo, pos["id"], close_ts, mark, signals=None
             )
@@ -95,6 +96,29 @@ def run_settlement(
         repo.close_position(
             pos["id"], state, close_premium, close_reason, pnl, close_at=close_ts
         )
+
+        try:
+            repo.save_position_close_snapshot(
+                pos["id"],
+                {
+                    "schema": "position_close_snapshot_v1",
+                    "closed_at": close_ts,
+                    "close_premium": close_premium,
+                    "selected_close_reason": close_reason,
+                    "close_notes": None,
+                    "realized_pnl": pnl,
+                    "exit_signal_id": None,
+                    "exit_signal": None,
+                    "mark": mark,
+                },
+                close_signal_id=None,
+            )
+        except Exception as exc:
+            log.warning(
+                "settlement: close_snapshot save failed (non-fatal) position_id=%s: %s",
+                pos["id"],
+                exc,
+            )
 
         level = "info" if outcome == "expired_otm" else "warn"
         if outcome == "expired_otm":

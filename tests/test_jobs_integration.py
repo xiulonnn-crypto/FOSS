@@ -205,6 +205,12 @@ def test_settlement_otm(repo, tmp_path, monkeypatch):
     assert len(snaps) == 1
     assert snaps[0]["spot"] == pytest.approx(175.0)
     assert snaps[0]["current_mid"] == pytest.approx(0.0)
+    # settlement must write close_snapshot so the attr-drawer shows exit data
+    cs = pos.get("close_snapshot")
+    assert isinstance(cs, dict), "settlement must write close_snapshot"
+    assert cs["schema"] == "position_close_snapshot_v1"
+    assert cs["selected_close_reason"] == "expired_otm"
+    assert cs["mark"]["spot"] == pytest.approx(175.0)
 
 
 def test_settlement_assigned(repo, tmp_path, monkeypatch):
@@ -231,3 +237,8 @@ def test_settlement_assigned(repo, tmp_path, monkeypatch):
     assert len(snaps) == 1
     assert snaps[0]["spot"] == pytest.approx(175.0)
     assert snaps[0]["current_mid"] == pytest.approx(25.0)
+    cs = pos.get("close_snapshot")
+    assert isinstance(cs, dict), "settlement must write close_snapshot"
+    assert cs["schema"] == "position_close_snapshot_v1"
+    assert cs["selected_close_reason"] == "assigned"
+    assert cs["mark"]["spot"] == pytest.approx(175.0)
