@@ -282,13 +282,31 @@ def _finalize_bucket(stats: Dict[str, Any], min_sample: int) -> Dict[str, Any]:
     }
 
 
+def build_position_dimension_summary(
+    position: Dict[str, Any],
+    snapshot: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Nine-dimension bucket labels for a single closed position."""
+    snap = snapshot or {}
+    out: List[Dict[str, Any]] = []
+    for dim_key, dim_label, bucket_fn in _SLICE_DIMENSIONS:
+        bucket, bucket_label, _order = bucket_fn(snap, position)
+        out.append({
+            "dimension": dim_key,
+            "label": dim_label,
+            "bucket": bucket,
+            "bucket_label": bucket_label,
+        })
+    return out
+
+
 def build_condition_slices(
     records: List[Dict[str, Any]],
     min_sample: int,
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
-    """Return (slices dict, factor_slices list for backward compatibility)."""
+    """Return (slices dict, condition_slices list)."""
     slices_dict: Dict[str, List[Dict[str, Any]]] = {}
-    factor_list: List[Dict[str, Any]] = []
+    condition_list: List[Dict[str, Any]] = []
 
     for dim_key, dim_label, bucket_fn in _SLICE_DIMENSIONS:
         buckets: Dict[str, Dict[str, Any]] = {}
@@ -320,9 +338,14 @@ def build_condition_slices(
             for stats in sorted(buckets.values(), key=lambda s: (s["sort_order"], s["bucket"]))
         ]
         slices_dict[dim_key] = finalized
-        factor_list.append({"factor": dim_key, "dimension": dim_key, "label": dim_label, "buckets": finalized})
+        condition_list.append({
+            "factor": dim_key,
+            "dimension": dim_key,
+            "label": dim_label,
+            "buckets": finalized,
+        })
 
-    return slices_dict, factor_list
+    return slices_dict, condition_list
 
 
 def _spearman(xs: List[float], ys: List[float]) -> Optional[float]:

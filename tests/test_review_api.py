@@ -174,7 +174,7 @@ def test_review_summary_empty(tmp_path):
         assert r2.get_json()["positions"] == []
 
 
-def test_review_summary_includes_factor_slices_and_setting_suggestions(client_with_data):
+def test_review_summary_includes_condition_slices_and_setting_suggestions(client_with_data):
     repo = client_with_data.application.config["REPO"]
     rows = client_with_data.get("/api/review/closed_positions").get_json()["positions"]
     ids = {r["symbol"]: r["id"] for r in rows}
@@ -208,7 +208,8 @@ def test_review_summary_includes_factor_slices_and_setting_suggestions(client_wi
 
     assert resp.status_code == 200
     data = resp.get_json()
-    slices = {row["factor"]: row for row in data["factor_slices"]}
+    slices = {row["factor"]: row for row in data["condition_slices"]}
+    assert "factor_slices" not in data
     assert {
         "quality_grade",
         "entry_signal_status",
@@ -220,7 +221,7 @@ def test_review_summary_includes_factor_slices_and_setting_suggestions(client_wi
         "close_reason",
         "pool_source",
     } <= set(slices)
-    assert data.get("slices") == {row["factor"]: row["buckets"] for row in data["factor_slices"]}
+    assert data.get("slices") == {row["factor"]: row["buckets"] for row in data["condition_slices"]}
     assert "performance_review" in data
     assert "score_pnl_correlation" in data
     assert data.get("avg_realized_roe") is not None
@@ -237,6 +238,60 @@ def test_review_summary_includes_factor_slices_and_setting_suggestions(client_wi
     suggestion_keys = {s.get("setting_key") for s in data["setting_suggestions"]}
     assert "filters.margin_buffer_min" in suggestion_keys
     assert suggestion_keys & {"filters.delta_max", "entry_signal.openable_only"}
+
+
+def test_position_snapshot_includes_close_snapshot(client_with_data):
+    repo = client_with_data.application.config["REPO"]
+    rows = client_with_data.get("/api/review/closed_positions").get_json()["positions"]
+    pid = rows[0]["id"]
+    repo.save_position_close_snapshot(pid, {
+        "schema": "position_close_snapshot_v1",
+        "closed_at": rows[0].get("close_at"),
+        "close_premium": 0.5,
+        "selected_close_reason": "take_profit_50",
+        "exit_signal": {"reason_text": "捕获约 55% 最大收益"},
+        "mark": {"spot": 180.0, "delta": -0.08, "iv": 0.25},
+    }, None)
+    r = client_with_data.get(f"/api/review/positions/{pid}/snapshot")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body.get("close_snapshot") is not None
+    assert body["close_snapshot"]["close_premium"] == 0.5
+
+
+def test_position_diagnosis_endpoint(client_with_data):
+    repo = client_with_data.application.config["REPO"]
+    rows = client_with_data.get("/api/review/closed_positions").get_json()["positions"]
+    pid = next(r["id"] for r in rows if r["symbol"] == "TSLA")
+    repo.save_open_snapshot(pid, {
+        "quality_grade": "A",
+        "entry_signal_status": "OPENABLE",
+        "delta": -0.15,
+        "dte": 30,
+        "iv_rank": 50,
+        "margin_buffer": 0.12,
+    })
+    r = client_with_data.get(f"/api/review/positions/{pid}/diagnosis")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["position_id"] == pid
+    assert len(body["dimension_summary"]) == 9
+    assert any("止盈" in h.get("text", "") for h in body.get("highlights", []))
+
+
+def test_position_diagnosis_rejects_open(client_with_data):
+    repo = client_with_data.application.config["REPO"]
+    pid = repo.insert_position({
+        "symbol": "TEST",
+        "expiration": "2026-12-19",
+        "strike": 100.0,
+        "contracts": 1,
+        "open_at": datetime.now(timezone.utc).isoformat(),
+        "open_premium": 2.0,
+        "state": "OPEN",
+    })
+    r = client_with_data.get(f"/api/review/positions/{pid}/diagnosis")
+    assert r.status_code == 400
 
 
 @patch("app.api.routes_review.time.sleep")

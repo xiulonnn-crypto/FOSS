@@ -14,6 +14,7 @@ from app.core.entry_rehistory import recalculate_closed_position_insights
 from app.core.review_analytics import (
     build_condition_slices,
     build_performance_review,
+    build_position_dimension_summary,
     build_review_records,
     build_score_pnl_correlation,
     compute_annualized_returns,
@@ -22,6 +23,7 @@ from app.core.review_analytics import (
     position_holding_days,
     position_roe,
 )
+from app.core.review_highlights import build_position_highlights
 from app.core.review_suggestions import (
     apply_suggestion_changes,
     build_suggestions,
@@ -462,7 +464,7 @@ def _compute_summary(
             "avg_maee": None,
             "avg_mfe": None,
             "slices": {},
-            "factor_slices": [],
+            "condition_slices": [],
             "performance_review": {
                 "best_combo": [],
                 "worst_drawdown_combo": [],
@@ -576,7 +578,7 @@ def _compute_summary(
     snapshots = _load_open_snapshots(repo, position_ids) if repo else {}
     excursions = _load_excursions(repo, position_ids)
     records = build_review_records(positions, snapshots, excursions)
-    slices_dict, factor_slices = build_condition_slices(records, min_sample)
+    slices_dict, condition_slices = build_condition_slices(records, min_sample)
     ann_list = compute_annualized_returns(records)
     avg_annualized_return = sum(ann_list) / len(ann_list) if ann_list else None
     performance_review = build_performance_review(slices_dict, min_sample, avg_roe)
@@ -611,7 +613,7 @@ def _compute_summary(
         "avg_maee": avg_maee,
         "avg_mfe": avg_mfe,
         "slices": slices_dict,
-        "factor_slices": factor_slices,
+        "condition_slices": condition_slices,
         "performance_review": performance_review,
         "score_pnl_correlation": score_pnl_correlation,
         "setting_suggestions": legacy_suggestions,
@@ -972,7 +974,36 @@ def position_snapshot(position_id: int):
     return jsonify({
         "position_id": position_id,
         "open_snapshot": open_snapshot,
+        "close_snapshot": pos.get("close_snapshot"),
         "candidate_data": candidate_data,
+    })
+
+
+@bp_review.route("/positions/<int:position_id>/diagnosis")
+def position_diagnosis(position_id: int):
+    """Per-order nine-dimension summary plus rule-based highlights/lowlights."""
+    repo: Repo = current_app.config["REPO"]
+    pos = repo.get_position(position_id)
+    if not pos:
+        return jsonify({"error": "Position not found"}), 404
+    if str(pos.get("state") or "") not in _CLOSED_POSITION_STATES:
+        return jsonify({"error": "position not closed"}), 400
+
+    open_snapshot: Dict[str, Any] = {}
+    try:
+        open_snapshot = repo.get_open_snapshot(position_id) or {}
+    except AttributeError:
+        pass
+    if not isinstance(open_snapshot, dict):
+        open_snapshot = {}
+
+    dimension_summary = build_position_dimension_summary(pos, open_snapshot)
+    hl = build_position_highlights(pos, open_snapshot)
+    return jsonify({
+        "position_id": position_id,
+        "dimension_summary": dimension_summary,
+        "highlights": hl["highlights"],
+        "lowlights": hl["lowlights"],
     })
 
 

@@ -2484,7 +2484,7 @@ async function loadReview() {
     ? suggestionsPayload.suggestions
     : (summary.setting_suggestions || []);
   renderReviewSuggestions(suggRows);
-  renderReviewConditionSlices(summary.factor_slices || []);
+  renderReviewConditionSlices(summary.condition_slices || []);
   renderReviewPerformanceReview(summary.performance_review || {});
   renderReviewScoreCorrelation(summary.score_pnl_correlation || {});
 
@@ -2645,19 +2645,114 @@ function closeAttrDrawer() {
 
 async function loadAttrDrawerData(positionId) {
   try {
-    const [attr, snap] = await Promise.all([
+    const body = document.getElementById('attr-drawer-body');
+    const [attrRes, snapRes, diagRes] = await Promise.allSettled([
       apiFetch(`/api/review/positions/${positionId}/attribution`),
       apiFetch(`/api/review/positions/${positionId}/snapshot`),
+      apiFetch(`/api/review/positions/${positionId}/diagnosis`),
     ]);
-    document.getElementById('attr-drawer-body').innerHTML = renderAttrDrawer(attr, snap);
+    const attr = attrRes.status === 'fulfilled' ? attrRes.value : null;
+    const snap = snapRes.status === 'fulfilled' ? snapRes.value : null;
+    const diag = diagRes.status === 'fulfilled' ? diagRes.value : null;
+    body.innerHTML = renderAttrDrawer(attr, snap, diag);
   } catch (e) {
     document.getElementById('attr-drawer-body').innerHTML =
-      `<div class="text-rose-400 text-sm py-4 text-center">加载失败：${e.message}</div>`;
+      `<div class="text-rose-400 text-sm py-4 text-center">加载失败：${escapeHtml(e.message)}</div>`;
   }
 }
 
-function renderAttrDrawer(attr, snap) {
+function renderOrderDiagnosisCard(diag) {
+  const shell = 'rounded-xl border border-gray-700/80 bg-gray-900/90 shadow-sm p-4 space-y-3';
+  if (!diag) {
+    return `
+      <section class="${shell}">
+        <h4 class="text-sm font-semibold text-gray-100">订单诊断</h4>
+        <p class="text-xs text-gray-500">诊断数据暂不可用</p>
+      </section>`;
+  }
+  const dims = Array.isArray(diag.dimension_summary) ? diag.dimension_summary : [];
+  const badges = dims.length
+    ? dims.map(d => {
+        const lbl = escapeHtml(d.label || d.dimension || '—');
+        const bucket = escapeHtml(d.bucket_label || d.bucket || '—');
+        return `<span class="text-xs bg-gray-700 text-gray-200 px-2 py-0.5 rounded break-words">${lbl}: ${bucket}</span>`;
+      }).join('')
+    : '<span class="text-xs text-gray-500">—</span>';
+  const highlights = (diag.highlights || []).slice(0, 3);
+  const lowlights = (diag.lowlights || []).slice(0, 3);
+  const hlHtml = highlights.length
+    ? `<ul class="space-y-1">${highlights.map(h =>
+        `<li class="text-xs text-green-400 flex gap-1.5"><span aria-hidden="true">✅</span><span class="break-words">${escapeHtml(h.text || '')}</span></li>`
+      ).join('')}</ul>`
+    : '';
+  const llHtml = lowlights.length
+    ? `<ul class="space-y-1">${lowlights.map(h =>
+        `<li class="text-xs text-yellow-400 flex gap-1.5"><span aria-hidden="true">⚠</span><span class="break-words">${escapeHtml(h.text || '')}</span></li>`
+      ).join('')}</ul>`
+    : '';
+  return `
+    <section class="${shell}">
+      <h4 class="text-sm font-semibold text-gray-100">订单诊断</h4>
+      <div class="flex flex-wrap gap-1.5">${badges}</div>
+      ${hlHtml ? `<div><p class="text-xs text-gray-500 mb-1">亮点</p>${hlHtml}</div>` : ''}
+      ${llHtml ? `<div><p class="text-xs text-gray-500 mb-1">暗点</p>${llHtml}</div>` : ''}
+    </section>`;
+}
+
+function renderCloseSnapshotCard(snap) {
+  const shell = 'rounded-xl border border-gray-700/80 bg-gray-900/90 shadow-sm p-4';
+  const dash = '<span class="text-gray-600 tabular-nums">—</span>';
+  const cs = snap && snap.close_snapshot;
+  if (!cs || typeof cs !== 'object') {
+    return `
+      <section class="${shell}">
+        <h4 class="text-sm font-semibold text-gray-100 mb-2">出场环境快照</h4>
+        <p class="text-center text-xs text-gray-500 py-4">暂无出场环境快照</p>
+      </section>`;
+  }
+  const closedAt = cs.closed_at ? formatQuotedAt(cs.closed_at) : null;
+  const premium = cs.close_premium != null && cs.close_premium !== ''
+    ? `$${Number(cs.close_premium).toFixed(2)}`
+    : null;
+  const reasonCode = cs.selected_close_reason || '';
+  const reasonLbl = REVIEW_CLOSE_REASON_LABELS[reasonCode] || reasonCode || '—';
+  const exitSig = cs.exit_signal;
+  let signalText = '无出场信号记录';
+  if (exitSig && typeof exitSig === 'object') {
+    signalText = exitSig.reason_text || exitSig.summary || exitSig.action || signalText;
+  }
+  const mark = cs.mark && typeof cs.mark === 'object' ? cs.mark : null;
+  const markRows = mark
+    ? [
+        ['标的价', mark.spot != null ? `$${Number(mark.spot).toFixed(2)}` : null],
+        ['Delta', mark.delta != null ? Number(mark.delta).toFixed(3) : null],
+        ['IV', mark.iv != null ? `${(Number(mark.iv) * 100).toFixed(1)}%` : null],
+      ]
+    : [];
+  const baseRows = [
+    ['平仓时间', closedAt],
+    ['平仓价', premium],
+    ['出场原因', escapeHtml(reasonLbl)],
+  ];
+  const tableRows = [...baseRows, ...markRows]
+    .map(([label, cell]) => `
+      <tr class="border-b border-gray-800 last:border-b-0">
+        <td class="py-2 text-xs text-gray-400">${label}</td>
+        <td class="py-2 text-right text-xs text-gray-50 tabular-nums">${cell != null && cell !== '' ? cell : dash}</td>
+      </tr>`)
+    .join('');
+  return `
+    <section class="${shell}">
+      <h4 class="text-sm font-semibold text-gray-100 mb-2">出场环境快照</h4>
+      <table class="w-full border-collapse mb-3">${tableRows}</table>
+      <p class="text-xs text-gray-500 leading-snug break-words">出场信号：${escapeHtml(String(signalText))}</p>
+    </section>`;
+}
+
+function renderAttrDrawer(attr, snap, diag) {
   attr = attr || {};
+  const cardDiagnosis = renderOrderDiagnosisCard(diag);
+  const cardCloseSnap = renderCloseSnapshotCard(snap);
   const snapCardShell =
     'rounded-xl border border-gray-700/80 bg-gray-900/90 shadow-sm';
 
@@ -2939,7 +3034,7 @@ function renderAttrDrawer(attr, snap) {
       </section>`;
   }
 
-  return `${cardPnL}${cardMaeMfe}${cardMassive}${cardSnap}`;
+  return `<div class="space-y-4">${cardDiagnosis}${cardPnL}${cardMaeMfe}${cardMassive}${cardSnap}${cardCloseSnap}</div>`;
 }
 
 // ================================================================
@@ -2985,6 +3080,13 @@ const SETTINGS_FIELD_LABELS = {
   integrations: {
     massive_enrich_closed: '已平仓 Massive 增补（0 关 / 1 开；需 .env 中 MASSIVE_API_KEY）',
   },
+  entry_signal: {
+    openable_only: '仅扫描可开仓合约',
+  },
+  review: {
+    min_sample_size: '复盘最少样本数',
+    score_correlation_buckets: '评分分位分组（逗号分隔，如 60,80）',
+  },
 };
 
 function settingsFieldLabel(groupKey, fieldKey) {
@@ -3002,29 +3104,62 @@ function renderSettingsForm(s) {
     {key: 'filters', label: '入场过滤'},
     {key: 'exits', label: '出场信号'},
     {key: 'scoring_weights', label: '评分权重'},
+    {key: 'entry_signal', label: '入场信号'},
     {key: 'schedule', label: '调度计划'},
     {key: 'fees', label: '费用'},
+    {key: 'review', label: '复盘分析'},
     {key: 'integrations', label: '外部数据'},
   ];
-  container.innerHTML = groups.map(g => {
+  const groupHtml = groups.map(g => {
     let raw = s[g.key] ?? {};
     if (g.key === 'integrations' && (!raw || Object.keys(raw).length === 0)) {
       raw = { massive_enrich_closed: 0 };
     }
     const data = raw;
-    const fields = Object.entries(data).map(([k, v]) => `
+    const fields = Object.entries(data).map(([k, v]) => {
+      const label = settingsFieldLabel(g.key, k);
+      if (g.key === 'entry_signal' && k === 'openable_only') {
+        const checked = v ? ' checked' : '';
+        return `
       <div class="flex items-center gap-3">
-        <label class="min-w-[10rem] max-w-[12rem] shrink-0 text-xs text-gray-400 leading-snug">${settingsFieldLabel(g.key, k)}</label>
+        <label class="min-w-[10rem] max-w-[12rem] shrink-0 text-xs text-gray-400 leading-snug">${label}</label>
+        <input data-group="${g.key}" data-key="${k}" data-type="boolean" type="checkbox"${checked}
+          class="h-4 w-4 rounded border-gray-600 bg-gray-700 text-indigo-500 focus:ring-indigo-500" />
+      </div>`;
+      }
+      if (g.key === 'review' && k === 'score_correlation_buckets') {
+        const arrVal = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+        return `
+      <div class="flex items-center gap-3">
+        <label class="min-w-[10rem] max-w-[12rem] shrink-0 text-xs text-gray-400 leading-snug">${label}</label>
+        <input data-group="${g.key}" data-key="${k}" data-type="array" type="text" value="${escapeHtml(arrVal)}"
+          class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>`;
+      }
+      return `
+      <div class="flex items-center gap-3">
+        <label class="min-w-[10rem] max-w-[12rem] shrink-0 text-xs text-gray-400 leading-snug">${label}</label>
         <input data-group="${g.key}" data-key="${k}" type="${typeof v === 'number' ? 'number' : 'text'}"
           step="any" value="${v}"
           class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500" />
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     return `<div class="bg-gray-800 rounded-lg p-4 space-y-2">
       <h3 class="text-sm font-semibold text-gray-300 mb-2">${g.label}</h3>
       ${fields}
     </div>`;
   }).join('');
+  const providerVal = typeof s.provider === 'string' ? s.provider : 'yfinance';
+  const providerBlock = `
+    <div class="bg-gray-800 rounded-lg p-4 space-y-2">
+      <h3 class="text-sm font-semibold text-gray-300 mb-2">行情来源</h3>
+      <div class="flex items-center gap-3">
+        <label class="min-w-[10rem] max-w-[12rem] shrink-0 text-xs text-gray-400 leading-snug">默认行情源</label>
+        <input data-scalar="provider" type="text" value="${escapeHtml(providerVal)}"
+          class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+    </div>`;
+  container.innerHTML = groupHtml + providerBlock;
 }
 
 document.getElementById('btn-save-settings').addEventListener('click', async () => {
@@ -3033,9 +3168,19 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
   inputs.forEach(inp => {
     const g = inp.dataset.group, k = inp.dataset.key;
     if (!partial[g]) partial[g] = {};
+    if (inp.dataset.type === 'boolean') {
+      partial[g][k] = inp.checked;
+      return;
+    }
     const v = inp.value;
+    if (inp.dataset.type === 'array') {
+      partial[g][k] = v.split(',').map(x => parseFloat(x.trim())).filter(x => !Number.isNaN(x));
+      return;
+    }
     partial[g][k] = isNaN(parseFloat(v)) ? v : parseFloat(v);
   });
+  const providerInp = document.querySelector('#settings-form input[data-scalar="provider"]');
+  if (providerInp) partial.provider = providerInp.value.trim();
   try {
     _settings = await apiFetch('/api/settings', {
       method: 'POST',

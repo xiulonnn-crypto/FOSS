@@ -19,3 +19,7 @@ def test_review_js_has_condition_renderers():
     assert "reviewFilterQueryString" in text
     assert "renderReviewPerformanceReview" in text
     assert "因子切片" not in text
+    assert "condition_slices" in text
+    assert "renderOrderDiagnosisCard" in text
+    assert "renderCloseSnapshotCard" in text
+    assert "/diagnosis" in text
