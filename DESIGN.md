@@ -38,5 +38,5 @@
 | 持仓动作建议弹窗 | `index.html` + `app.js` `openExitSignalModal()` | 展示 action/severity/urgency、收益/风险/时间/数据质量 reasons、当前值与阈值 |
 | 继续持有记录弹窗 | `index.html` + `app.js` `openContinueHoldModal()` | 记录继续持有原因与备注，关联当前 `exit_signal_id` |
 | 平仓弹窗 | `app.js` `openClosePositionModal()` | 从建议进入时自动带入建议出场原因、当前估价与 `exit_signal_id`；支持 `take_profit_fast`、`loss_breach` |
-| 复盘四指标 | `app.js` `loadReview()` | 调 `/api/review/summary`；CSV 导出链接 |
+| 复盘页 | `app.js` `loadReview()` | 筛选器 + 汇总卡片 + 条件切片 + 表现体检 + 评分关联 + 设置建议应用；`/api/review/summary` 与 `/api/review/suggestions`；CSV 导出 |
 | 设置表单 | `app.js` `renderSettingsForm()` | 5 个分组，数字/文本输入，保存触发热加载 |

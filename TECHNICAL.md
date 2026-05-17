@@ -115,6 +115,13 @@ API：
 
 用户在 `#settings` 保存 → `POST /api/settings` → server 写 DB → `POST 127.0.0.1:7001/reload` → worker 重读 settings 并调用 `register_jobs(scheduler, repo)` 重新注册所有 job（含新时间间隔）。
 
+### 复盘 API（Phase 5）
+
+- `GET /api/review/summary?since=&until=&symbols=&pool=&min_sample=`：返回汇总、`slices`（九维条件切片）、`performance_review`、`score_pnl_correlation`；兼容字段 `factor_slices` 与 `setting_suggestions`。
+- `GET /api/review/suggestions`：返回带 `changes[]` 的可应用建议列表。
+- `POST /api/review/suggestions/apply`：body `{"suggestion_ids":[]}`，原子 merge settings；worker reload 失败时回滚并返回 409。
+- Settings 新增：`entry_signal.openable_only`、`review.min_sample_size`、`review.score_correlation_buckets`。
+
 ## 7. 故障排查
 
 | 症状 | 排查 |

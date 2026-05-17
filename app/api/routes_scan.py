@@ -67,6 +67,29 @@ def _candidate_wire(row: dict, settings: Optional[dict] = None) -> dict:
     return out
 
 
+def _filter_openable_candidates(candidates: list, settings: dict) -> list:
+    """When entry_signal.openable_only, keep rows with OPENABLE status only."""
+    entry_cfg = settings.get("entry_signal") or {}
+    if not entry_cfg.get("openable_only"):
+        return candidates
+    filtered = []
+    for row in candidates:
+        sig = row.get("entry_signal")
+        status = None
+        if isinstance(sig, dict):
+            status = sig.get("status")
+        if status is None:
+            status = row.get("entry_signal_status")
+        if str(status or "").upper() == "OPENABLE":
+            filtered.append(row)
+    return filtered
+
+
+def _wire_scan_candidates(candidates: list, settings: dict) -> list:
+    wired = [_candidate_wire(c, settings) for c in candidates]
+    return _filter_openable_candidates(wired, settings)
+
+
 def _run_meta_wire(meta: Optional[dict]) -> Optional[dict]:
     if not meta:
         return None
@@ -296,7 +319,7 @@ def scan_run_detail(run_id: int):
     return jsonify(
         {
             "schema": "scan_latest_v2",
-            "candidates": [_candidate_wire(c, settings) for c in candidates],
+            "candidates": _wire_scan_candidates(candidates, settings),
             "run": _run_meta_wire(meta),
         }
     )
@@ -326,7 +349,7 @@ def latest_candidates():
     return jsonify(
         {
             "schema": "scan_latest_v2",
-            "candidates": [_candidate_wire(c, settings) for c in candidates],
+            "candidates": _wire_scan_candidates(candidates, settings),
             "run": _run_meta_wire(meta),
         }
     )

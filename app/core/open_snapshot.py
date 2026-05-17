@@ -23,6 +23,7 @@ _CANDIDATE_FIELDS = (
     "dte",
     "annualized_roi",
     "score",
+    "margin_buffer",
 )
 
 _QUALITY_FIELDS = (
@@ -182,6 +183,13 @@ def build_open_snapshot_dict(
 
     symbol = (pos.get("symbol") or "").upper().strip()
     entry_dt = position_open_datetime(pos)
+    if snapshot.get("option_watchlist_id"):
+        snapshot["pool_source"] = "watch"
+    elif snapshot.get("option_pool_id"):
+        snapshot["pool_source"] = "main"
+    else:
+        snapshot["pool_source"] = "manual"
+
     if symbol and entry_dt:
         closes = closes_through_entry(symbol, entry_dt)
         if closes:

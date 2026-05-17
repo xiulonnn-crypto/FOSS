@@ -8,9 +8,24 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from flask import Blueprint, Response, current_app, jsonify
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from app.core.entry_rehistory import recalculate_closed_position_insights
+from app.core.review_analytics import (
+    build_condition_slices,
+    build_performance_review,
+    build_review_records,
+    build_score_pnl_correlation,
+    compute_annualized_returns,
+    filter_closed_positions,
+    parse_review_filters,
+    position_holding_days,
+    position_roe,
+)
+from app.core.review_suggestions import (
+    apply_suggestion_changes,
+    build_suggestions,
+)
 from app.core.open_snapshot import build_open_snapshot_dict
 from app.core.pnl_excursion import relative_mae_mfe_from_pnls_chronologic
 from app.core.pnl_excursion_intraday import enrich_closed_position_intraday_bs
@@ -53,10 +68,13 @@ def _intraday_bs_needs_daily_hl_migration(open_snapshot: Any) -> bool:
     return False
 
 
-def _get_closed_positions(repo: Repo) -> List[Dict[str, Any]]:
+def _get_closed_positions(repo: Repo, *, include_deleted: bool = False) -> List[Dict[str, Any]]:
     """Return all non-OPEN positions for review calculations."""
     all_pos = repo.list_positions()
-    return [p for p in all_pos if p.get("state") in _CLOSED_POSITION_STATES]
+    rows = [p for p in all_pos if p.get("state") in _CLOSED_POSITION_STATES]
+    if not include_deleted:
+        rows = [p for p in rows if p.get("state") != "DELETED"]
+    return rows
 
 
 def _merge_open_snapshot_refresh(repo: Repo, position_id: int, pos: Dict[str, Any]) -> Dict[str, Any]:
@@ -417,13 +435,25 @@ def _build_setting_suggestions(factor_slices: List[Dict[str, Any]]) -> List[Dict
     return suggestions[:4]
 
 
-def _compute_summary(positions: List[Dict[str, Any]], repo: Optional[Repo]) -> Dict[str, Any]:
+def _compute_summary(
+    positions: List[Dict[str, Any]],
+    repo: Optional[Repo],
+    *,
+    filters: Optional[Dict[str, Any]] = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    filt = filters or {"min_sample": 5, "score_buckets": [60, 80]}
+    min_sample = int(filt.get("min_sample", 5))
+    settings = settings or {}
+
     if not positions:
         return {
             "trade_count": 0,
             "win_rate": None,
             "avg_annualized_roi": None,
             "avg_roe": None,
+            "avg_realized_roe": None,
+            "avg_annualized_return": None,
             "total_premium": None,
             "total_realized_pnl": None,
             "by_close_reason": [],
@@ -431,7 +461,15 @@ def _compute_summary(positions: List[Dict[str, Any]], repo: Optional[Repo]) -> D
             "sortino_ratio": None,
             "avg_maee": None,
             "avg_mfe": None,
+            "slices": {},
             "factor_slices": [],
+            "performance_review": {
+                "best_combo": [],
+                "worst_drawdown_combo": [],
+                "high_winrate_low_return": [],
+                "low_sample_warnings": [],
+            },
+            "score_pnl_correlation": {"spearman": None, "score_buckets": [], "pair_count": 0},
             "setting_suggestions": [],
         }
 
@@ -452,17 +490,15 @@ def _compute_summary(positions: List[Dict[str, Any]], repo: Optional[Repo]) -> D
         contracts = int(p.get("contracts") or 1)
         premium_list.append(op * contracts * 100)
 
-        strike = float(p.get("strike") or 1)
-        if strike > 0:
-            margin = strike * 100 * contracts
-            if margin > 0:
-                roi_list.append(pnl / margin)
+        roe = position_roe(p)
+        if roe is not None:
+            roi_list.append(roe)
 
         if p.get("id") is not None:
             position_ids.append(p["id"])
 
     win_rate = wins / trade_count if trade_count > 0 else None
-    avg_roi = sum(roi_list) / len(roi_list) if roi_list else None
+    avg_roe = sum(roi_list) / len(roi_list) if roi_list else None
     total_premium = sum(premium_list)
 
     # Sharpe ratio: mean(roi) / stdev(roi)
@@ -537,13 +573,36 @@ def _compute_summary(positions: List[Dict[str, Any]], repo: Optional[Repo]) -> D
             "avg_roi": stats["roi_sum"] / count if count > 0 else None,
         })
 
-    factor_slices = _build_factor_slices(positions, repo)
+    snapshots = _load_open_snapshots(repo, position_ids) if repo else {}
+    excursions = _load_excursions(repo, position_ids)
+    records = build_review_records(positions, snapshots, excursions)
+    slices_dict, factor_slices = build_condition_slices(records, min_sample)
+    ann_list = compute_annualized_returns(records)
+    avg_annualized_return = sum(ann_list) / len(ann_list) if ann_list else None
+    performance_review = build_performance_review(slices_dict, min_sample, avg_roe)
+    score_pnl_correlation = build_score_pnl_correlation(
+        records, filt.get("score_buckets") or [60, 80]
+    )
+    suggestions = build_suggestions(slices_dict, performance_review, settings, min_sample)
+    legacy_suggestions = [
+        {
+            "severity": s.get("severity", "info"),
+            "setting_key": s.get("setting_key"),
+            "title": s.get("title"),
+            "detail": s.get("detail") or s.get("rationale"),
+            "factor": s.get("dimension"),
+            "bucket": s.get("bucket"),
+        }
+        for s in suggestions
+    ]
 
     return {
         "trade_count": trade_count,
         "win_rate": win_rate,
-        "avg_annualized_roi": avg_roi,
-        "avg_roe": avg_roi,
+        "avg_annualized_roi": avg_roe,
+        "avg_roe": avg_roe,
+        "avg_realized_roe": avg_roe,
+        "avg_annualized_return": avg_annualized_return,
         "total_premium": total_premium,
         "total_realized_pnl": round(sum_realized, 2),
         "by_close_reason": by_reason,
@@ -551,18 +610,129 @@ def _compute_summary(positions: List[Dict[str, Any]], repo: Optional[Repo]) -> D
         "sortino_ratio": sortino_ratio,
         "avg_maee": avg_maee,
         "avg_mfe": avg_mfe,
+        "slices": slices_dict,
         "factor_slices": factor_slices,
-        "setting_suggestions": _build_setting_suggestions(factor_slices),
+        "performance_review": performance_review,
+        "score_pnl_correlation": score_pnl_correlation,
+        "setting_suggestions": legacy_suggestions,
+        "filters_applied": {
+            "since": filt.get("since").isoformat() if filt.get("since") else None,
+            "until": filt.get("until").isoformat() if filt.get("until") else None,
+            "symbols": sorted(filt["symbols"]) if filt.get("symbols") else None,
+            "pool": filt.get("pool", "all"),
+            "min_sample": min_sample,
+        },
     }
+
+
+def _review_summary_context(repo: Repo) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    settings = repo.get_settings()
+    filters = parse_review_filters(request.args, settings)
+    positions = _get_closed_positions(repo, include_deleted=filters.get("include_deleted", False))
+    position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+    snapshots = _load_open_snapshots(repo, position_ids)
+    positions = filter_closed_positions(positions, snapshots, filters)
+    return positions, filters, settings
 
 
 @bp_review.route("/summary")
 def summary():
     repo: Repo = current_app.config["REPO"]
-    positions = _get_closed_positions(repo)
-    body = _compute_summary(positions, repo)
+    positions, filters, settings = _review_summary_context(repo)
+    body = _compute_summary(positions, repo, filters=filters, settings=settings)
     body["closed_positions"] = _sorted_closed_positions(positions)
     return jsonify(body)
+
+
+@bp_review.route("/suggestions")
+def review_suggestions():
+    repo: Repo = current_app.config["REPO"]
+    positions, filters, settings = _review_summary_context(repo)
+    position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+    snapshots = _load_open_snapshots(repo, position_ids)
+    excursions = _load_excursions(repo, position_ids)
+    records = build_review_records(positions, snapshots, excursions)
+    min_sample = int(filters.get("min_sample", 5))
+    slices_dict, _ = build_condition_slices(records, min_sample)
+    avg_roe = None
+    roes = [r["roe"] for r in records if r.get("roe") is not None]
+    if roes:
+        avg_roe = sum(roes) / len(roes)
+    performance_review = build_performance_review(slices_dict, min_sample, avg_roe)
+    suggestions = build_suggestions(slices_dict, performance_review, settings, min_sample)
+    return jsonify({"suggestions": suggestions, "filters_applied": filters})
+
+
+@bp_review.route("/suggestions/apply", methods=["POST"])
+def apply_review_suggestions():
+    import json
+    import urllib.error
+    import urllib.request
+
+    repo: Repo = current_app.config["REPO"]
+    body = request.get_json(silent=True) or {}
+    ids = body.get("suggestion_ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "suggestion_ids required"}), 400
+
+    settings = repo.get_settings()
+    filters = parse_review_filters(request.args, settings)
+    if body.get("min_sample") is not None:
+        try:
+            filters["min_sample"] = max(1, int(body["min_sample"]))
+        except (TypeError, ValueError):
+            filters["min_sample"] = 1
+    else:
+        filters["min_sample"] = 1
+    positions = _get_closed_positions(repo, include_deleted=filters.get("include_deleted", False))
+    position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+    snapshots = _load_open_snapshots(repo, position_ids)
+    positions = filter_closed_positions(positions, snapshots, filters)
+    position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+    snapshots = _load_open_snapshots(repo, position_ids)
+    excursions = _load_excursions(repo, position_ids)
+    records = build_review_records(positions, snapshots, excursions)
+    min_sample = int(filters.get("min_sample", 1))
+    slices_dict, _ = build_condition_slices(records, min_sample)
+    roes = [r["roe"] for r in records if r.get("roe") is not None]
+    avg_roe = sum(roes) / len(roes) if roes else None
+    performance_review = build_performance_review(slices_dict, min_sample, avg_roe)
+    suggestions = build_suggestions(slices_dict, performance_review, settings, min_sample)
+
+    patch = apply_suggestion_changes(settings, suggestions, [str(i) for i in ids])
+    if not patch:
+        return jsonify({"error": "no applicable changes for given ids"}), 400
+
+    before = repo.get_settings()
+    try:
+        updated = repo.merge_settings(patch)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    worker_url = "http://127.0.0.1:7001/reload"
+    try:
+        req = urllib.request.Request(
+            worker_url,
+            data=json.dumps({}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except Exception as exc:
+        repo.save_settings(before)
+        return jsonify({
+            "error": "worker_reload_failed",
+            "message": str(exc),
+            "settings_rolled_back": True,
+        }), 409
+
+    return jsonify({
+        "ok": True,
+        "applied_ids": [str(i) for i in ids],
+        "patch": patch,
+        "settings": updated,
+    })
 
 
 @bp_review.route("/closed_positions")

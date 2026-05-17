@@ -71,6 +71,8 @@ def test_build_open_snapshot_merges_candidate_without_history(monkeypatch, repo)
     snap = build_open_snapshot_dict(repo, pos, None)
     assert snap.get("delta") == pytest.approx(-0.2)
     assert snap.get("score") == pytest.approx(0.9)
+    assert snap.get("margin_buffer") == pytest.approx(0.05)
+    assert snap.get("pool_source") == "manual"
 
 
 def test_build_open_snapshot_merges_metrics_from_request(monkeypatch, repo):

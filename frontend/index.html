@@ -354,19 +354,57 @@
           <a id="btn-export-csv" href="/api/review/positions.csv" class="text-xs text-indigo-400 border border-indigo-700 rounded px-3 py-1 hover:bg-indigo-900 whitespace-nowrap">导出 CSV</a>
         </div>
       </div>
-      <!-- Summary cards -->
+      <!-- Review filters -->
+      <div class="bg-gray-800 rounded-lg p-4 flex flex-wrap gap-3 items-end" id="review-filters">
+        <label class="text-xs text-gray-400 flex flex-col gap-1">
+          起始日期
+          <input type="date" id="review-filter-since" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100">
+        </label>
+        <label class="text-xs text-gray-400 flex flex-col gap-1">
+          结束日期
+          <input type="date" id="review-filter-until" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100">
+        </label>
+        <label class="text-xs text-gray-400 flex flex-col gap-1 min-w-[8rem] flex-1">
+          标的（逗号分隔）
+          <input type="text" id="review-filter-symbols" placeholder="AAPL,SPY" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 w-full max-w-xs">
+        </label>
+        <label class="text-xs text-gray-400 flex flex-col gap-1">
+          来源池
+          <select id="review-filter-pool" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100">
+            <option value="all">全部</option>
+            <option value="main">合约池</option>
+            <option value="watch">观察池</option>
+            <option value="manual">手动录入</option>
+          </select>
+        </label>
+        <label class="text-xs text-gray-400 flex flex-col gap-1">
+          最少样本
+          <input type="number" id="review-filter-min-sample" min="1" max="50" value="5" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 w-20">
+        </label>
+        <button type="button" id="btn-review-apply-filters"
+          class="text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded border border-indigo-500">
+          应用筛选
+        </button>
+      </div>
+            <!-- Summary cards -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="review-summary"></div>
-      <!-- Review optimization suggestions -->
+      <div class="bg-gray-800 rounded-lg p-4" id="review-performance-panel">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">表现体检</h3>
+        <div id="review-performance" class="grid gap-3 md:grid-cols-2"></div>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-4" id="review-correlation-panel">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">开仓评分与盈亏关联</h3>
+        <div id="review-correlation" class="text-sm text-gray-300"></div>
+      </div>
       <div class="bg-gray-800 rounded-lg p-4" id="review-suggestions-panel">
-        <h3 class="text-sm font-medium text-gray-400 mb-3">复盘优化建议</h3>
+        <h3 class="text-sm font-medium text-gray-400 mb-3">设置建议</h3>
         <div id="review-suggestions" class="grid gap-2 md:grid-cols-2"></div>
       </div>
-      <!-- Factor slice attribution -->
-      <div class="bg-gray-800 rounded-lg p-4" id="review-factor-slices-panel">
-        <h3 class="text-sm font-medium text-gray-400 mb-3">因子切片</h3>
-        <div id="review-factor-slices" class="grid gap-3 xl:grid-cols-2"></div>
+      <div class="bg-gray-800 rounded-lg p-4" id="review-condition-slices-panel">
+        <h3 class="text-sm font-medium text-gray-400 mb-3">条件切片</h3>
+        <div id="review-condition-slices" class="grid gap-3 xl:grid-cols-2"></div>
       </div>
-      <!-- Close reason breakdown -->
+<!-- Close reason breakdown -->
       <div class="bg-gray-800 rounded-lg p-4" id="review-breakdown">
         <h3 class="text-sm font-medium text-gray-400 mb-3">按出场原因</h3>
         <table class="w-full text-sm">

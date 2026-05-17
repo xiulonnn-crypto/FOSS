@@ -39,6 +39,13 @@
     "iv_refresh_time_et": "17:00"
   },
   "provider": "yfinance",
+  "entry_signal": {
+    "openable_only": false
+  },
+  "review": {
+    "min_sample_size": 5,
+    "score_correlation_buckets": [60, 80]
+  },
   "integrations": {
     "massive_enrich_closed": 0
   },

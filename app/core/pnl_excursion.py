@@ -35,3 +35,21 @@ def relative_mae_mfe_from_pnls_chronologic(pnls_sorted: List[float]) -> Tuple[Op
     baseline = pnls_sorted[0]
     ex = [float(v) - baseline for v in pnls_sorted]
     return min(ex), max(ex)
+
+
+def compute_annualized_return(realized_roe: float, holding_days: float) -> Optional[float]:
+    """
+    Annualize a single trade ROE by holding period (calendar days).
+
+    ``(1 + roe) ** (365 / days) - 1``; returns None when days < 1.
+    """
+    if holding_days is None or holding_days < 1.0:
+        return None
+    try:
+        roe_f = float(realized_roe)
+        days_f = float(holding_days)
+    except (TypeError, ValueError):
+        return None
+    if days_f < 1.0:
+        return None
+    return (1.0 + roe_f) ** (365.0 / days_f) - 1.0

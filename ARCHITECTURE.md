@@ -39,6 +39,8 @@ worker.py :7001            Jobs ───────┘
 
 **复盘 / 成交详情抽屉**：`GET /api/review/positions/:id/attribution` 使用 `open_snapshot`/候选希腊与 `radar_snapshots` 计算 BS 归因与 MAE/MFE；`GET .../snapshot` 返回 `open_snapshot`（含可选 `massive` 块）。已平仓「入场重算」走 `entry_rehistory.recalculate_closed_position_insights`（可重写雷达为日线 BS 回放）。批量「已平仓入场重算」API 已移除，仅保留单笔 `entry_recalc`。
 
+**复盘 Phase 5**：`GET /api/review/summary` 支持 `since`/`until`/`symbols`/`pool`/`min_sample` 筛选，返回 `slices`（九维条件切片）、`performance_review`、`score_pnl_correlation`、`avg_realized_roe` 与 `avg_annualized_return`；`GET/POST /api/review/suggestions` 提供可应用设置建议（原子 merge + worker `/reload`）。核心模块：`review_analytics`、`review_suggestions`、`close_reason_norm`。
+
 **扫描质量链路**：`job_screener` 在 `greeks.fill_greeks` 后调用 `strategy.score_csp_candidates_with_diagnostics`，同时写入候选快照与 `scan_runs.diagnostics`。`/api/scan/latest`、`/api/scan/run/:id`、`/api/scan/specific` 保持 `scan_latest_v2`，并在候选行上返回 flat 质量字段与 `data_quality` 嵌套对象；前端候选表、空状态与入场弹窗消费这些字段。
 
 **三层池链路**：`watchlist` 兼容旧观察名单并承担标的池；每轮扫描仍写 `candidates` 快照，同时 upsert `option_pool` 保存合约最新状态，并评估 `option_watchlist` 中的用户观察意图。新增 `app/core/option_pool.py` 纯规则模块，`routes_pool.py` 暴露 `/api/pool/*` 与 `/api/watch/options*`；观察池确认入场仍只写本地 `positions`，不连接券商、不自动下单。`worker.py` 启动时会执行一次轻量维护，调度器每日标记过期 pool/watch。

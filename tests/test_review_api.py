@@ -204,12 +204,26 @@ def test_review_summary_includes_factor_slices_and_setting_suggestions(client_wi
         "margin_buffer": 0.04,
     })
 
-    resp = client_with_data.get("/api/review/summary")
+    resp = client_with_data.get("/api/review/summary?min_sample=1")
 
     assert resp.status_code == 200
     data = resp.get_json()
     slices = {row["factor"]: row for row in data["factor_slices"]}
-    assert {"quality_grade", "entry_signal_status", "delta_abs", "dte", "iv_rank", "margin_buffer"} <= set(slices)
+    assert {
+        "quality_grade",
+        "entry_signal_status",
+        "delta_abs",
+        "dte",
+        "iv_rank",
+        "margin_buffer",
+        "rsi",
+        "close_reason",
+        "pool_source",
+    } <= set(slices)
+    assert data.get("slices") == {row["factor"]: row["buckets"] for row in data["factor_slices"]}
+    assert "performance_review" in data
+    assert "score_pnl_correlation" in data
+    assert data.get("avg_realized_roe") is not None
 
     quality = {b["bucket"]: b for b in slices["quality_grade"]["buckets"]}
     assert quality["A"]["count"] == 1
@@ -221,8 +235,8 @@ def test_review_summary_includes_factor_slices_and_setting_suggestions(client_wi
     assert delta["gt_0_20"]["win_rate"] == pytest.approx(0.5)
 
     suggestion_keys = {s.get("setting_key") for s in data["setting_suggestions"]}
-    assert "filters.delta_max" in suggestion_keys
     assert "filters.margin_buffer_min" in suggestion_keys
+    assert suggestion_keys & {"filters.delta_max", "entry_signal.openable_only"}
 
 
 @patch("app.api.routes_review.time.sleep")

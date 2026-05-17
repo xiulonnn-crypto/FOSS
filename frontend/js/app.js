@@ -2251,6 +2251,22 @@ function reviewPct(value, decimals = 1, signed = false) {
   return prefix + (n * 100).toFixed(decimals) + '%';
 }
 
+function reviewFilterQueryString() {
+  const params = new URLSearchParams();
+  const since = document.getElementById('review-filter-since')?.value;
+  const until = document.getElementById('review-filter-until')?.value;
+  const symbols = document.getElementById('review-filter-symbols')?.value?.trim();
+  const pool = document.getElementById('review-filter-pool')?.value || 'all';
+  const minSample = document.getElementById('review-filter-min-sample')?.value;
+  if (since) params.set('since', since);
+  if (until) params.set('until', until);
+  if (symbols) params.set('symbols', symbols);
+  if (pool && pool !== 'all') params.set('pool', pool);
+  if (minSample) params.set('min_sample', minSample);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 function renderReviewSuggestions(items) {
   const el = document.getElementById('review-suggestions');
   if (!el) return;
@@ -2263,30 +2279,61 @@ function renderReviewSuggestions(items) {
     warn: 'border-amber-500/40 bg-amber-500/10 text-amber-100',
     info: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100',
   };
-  el.innerHTML = rows.map(row => `
-    <div class="rounded border ${cls[row.severity] || cls.info} px-3 py-2">
+  el.innerHTML = rows.map(row => {
+    const changes = Array.isArray(row.changes) ? row.changes : [];
+    const changeHtml = changes.length
+      ? `<ul class="mt-1 text-[11px] text-gray-400 list-disc pl-4 break-words">${changes.map(c =>
+          `<li>${escapeHtml(c.key || '')}: ${escapeHtml(String(c.current ?? '-'))} → ${escapeHtml(String(c.proposed ?? '-'))}</li>`
+        ).join('')}</ul>`
+      : '';
+    const canApply = changes.length > 0 && row.id;
+    return `
+    <div class="rounded border ${cls[row.severity] || cls.info} px-3 py-2 flex flex-col gap-2">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-sm font-semibold leading-snug">${escapeHtml(row.title || '复盘建议')}</div>
-        ${row.setting_key ? `<span class="rounded bg-gray-950/40 px-1.5 py-0.5 text-[10px] text-gray-300">${escapeHtml(row.setting_key)}</span>` : ''}
+        <div class="text-sm font-semibold leading-snug break-words">${escapeHtml(row.title || '复盘建议')}</div>
+        ${row.sample_size != null ? `<span class="text-[10px] text-gray-400 shrink-0">n=${row.sample_size}</span>` : ''}
       </div>
-      <div class="mt-1 break-words text-xs leading-relaxed text-gray-300">${escapeHtml(row.detail || '')}</div>
-    </div>
-  `).join('');
+      <div class="break-words text-xs leading-relaxed text-gray-300">${escapeHtml(row.rationale || row.detail || '')}</div>
+      ${changeHtml}
+      ${canApply ? `<button type="button" class="self-start text-xs px-2 py-1 rounded border border-indigo-500 text-indigo-200 hover:bg-indigo-900/40" data-suggestion-id="${escapeHtml(row.id)}">应用建议</button>` : ''}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-suggestion-id]').forEach(btn => {
+    btn.addEventListener('click', () => applyReviewSuggestion(btn.getAttribute('data-suggestion-id')));
+  });
 }
 
-function renderReviewFactorSlices(slices) {
-  const el = document.getElementById('review-factor-slices');
+async function applyReviewSuggestion(suggestionId) {
+  if (!suggestionId) return;
+  if (!window.confirm('确认将本条建议写入设置并重新加载调度？')) return;
+  try {
+    await apiFetch('/api/review/suggestions/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion_ids: [suggestionId] }),
+    });
+    if (typeof showToast === 'function') showToast('设置已更新', 'success');
+    await loadReview();
+    if (_currentPage === 'settings' && typeof loadSettings === 'function') await loadSettings();
+  } catch (e) {
+    if (typeof showToast === 'function') showToast(e.message || '应用失败', 'error');
+    else alert(e.message || '应用失败');
+  }
+}
+
+function renderReviewConditionSlices(slices) {
+  const el = document.getElementById('review-condition-slices');
   if (!el) return;
   const rows = Array.isArray(slices) ? slices : [];
   if (!rows.length) {
-    el.innerHTML = '<div class="text-xs text-gray-500">暂无因子切片；已结束持仓生成入场快照后会显示。</div>';
+    el.innerHTML = '<div class="text-xs text-gray-500">暂无条件切片；已结束持仓生成入场快照后会显示。</div>';
     return;
   }
   el.innerHTML = rows.map(slice => {
     const buckets = Array.isArray(slice.buckets) ? slice.buckets : [];
     const body = buckets.map(bucket => `
-      <tr class="border-t border-gray-700/70 text-xs">
-        <td class="py-1.5 pr-2 text-left text-gray-200">${escapeHtml(bucket.label || bucket.bucket || '-')}</td>
+      <tr class="border-t border-gray-700/70 text-xs ${bucket.low_sample ? 'opacity-60' : ''}">
+        <td class="py-1.5 pr-2 text-left text-gray-200 break-words">${escapeHtml(bucket.label || bucket.bucket || '-')}${bucket.low_sample ? ' <span class="text-amber-400">少样本</span>' : ''}</td>
         <td class="py-1.5 text-right text-gray-300">${bucket.count ?? 0}</td>
         <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.win_rate, 0)}</td>
         <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.avg_roe, 1, true)}</td>
@@ -2297,7 +2344,7 @@ function renderReviewFactorSlices(slices) {
     `).join('') || '<tr><td colspan="7" class="py-3 text-center text-xs text-gray-500">暂无数据</td></tr>';
     return `
       <div class="rounded border border-gray-700 bg-gray-900/40 p-3">
-        <div class="mb-2 text-sm font-medium text-indigo-200">${escapeHtml(slice.label || slice.factor || '-')}</div>
+        <div class="mb-2 text-sm font-medium text-indigo-200 break-words">${escapeHtml(slice.label || slice.dimension || slice.factor || '-')}</div>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[34rem]">
             <thead class="text-[10px] uppercase text-gray-500">
@@ -2319,10 +2366,57 @@ function renderReviewFactorSlices(slices) {
   }).join('');
 }
 
+function renderReviewPerformanceReview(pr) {
+  const el = document.getElementById('review-performance');
+  if (!el) return;
+  const data = pr || {};
+  const section = (title, items) => {
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) return `<div class="text-xs text-gray-500">${escapeHtml(title)}：暂无</div>`;
+    return `<div class="rounded border border-gray-700 bg-gray-900/40 p-3"><div class="text-sm font-medium text-gray-300 mb-2">${escapeHtml(title)}</div><ul class="text-xs text-gray-400 space-y-1">${rows.map(r =>
+      `<li class="break-words">${escapeHtml(r.label || r.bucket || '-')} · n=${r.count ?? 0} · ROE ${reviewPct(r.avg_roe, 1, true)}</li>`
+    ).join('')}</ul></div>`;
+  };
+  el.innerHTML = [
+    section('最赚条件组合', data.best_combo),
+    section('最大浮亏组合', data.worst_drawdown_combo),
+    section('胜率高但收益偏低', data.high_winrate_low_return),
+    section('少样本警告', data.low_sample_warnings),
+  ].join('');
+}
+
+function renderReviewScoreCorrelation(corr) {
+  const el = document.getElementById('review-correlation');
+  if (!el) return;
+  const data = corr || {};
+  const sp = data.spearman;
+  const buckets = Array.isArray(data.score_buckets) ? data.score_buckets : [];
+  const spText = sp == null ? '样本不足' : sp.toFixed(2);
+  const bars = buckets.map(b => `
+    <div class="flex flex-wrap items-center gap-2 py-1 border-t border-gray-700/50">
+      <span class="w-16 text-xs text-gray-400 shrink-0">${escapeHtml(b.bucket)}</span>
+      <span class="text-xs text-gray-500">n=${b.n}</span>
+      <span class="text-xs text-gray-300">胜率 ${reviewPct(b.win_rate, 0)}</span>
+      <span class="text-xs text-gray-300">ROE ${reviewPct(b.avg_roe, 1, true)}</span>
+    </div>
+  `).join('');
+  el.innerHTML = `
+    <p class="text-xs text-gray-400 mb-2">Spearman 相关系数：<span class="text-indigo-200">${spText}</span>（配对 ${data.pair_count ?? 0} 笔）</p>
+    <div>${bars || '<p class="text-xs text-gray-500">暂无评分分位数据</p>'}</div>
+  `;
+}
+
 async function loadReview() {
+  const qs = typeof reviewFilterQueryString === 'function' ? reviewFilterQueryString() : '';
   let summary = null;
+  let suggestionsPayload = { suggestions: [] };
   try {
-    summary = await apiFetch('/api/review/summary');
+    summary = await apiFetch(`/api/review/summary${qs}`);
+    try {
+      suggestionsPayload = await apiFetch(`/api/review/suggestions${qs}`);
+    } catch {
+      suggestionsPayload = { suggestions: summary?.setting_suggestions || [] };
+    }
   } catch {
     document.getElementById('review-summary').innerHTML =
       '<div class="col-span-full text-sm text-gray-500">复盘数据不可用（尚无已结束持仓）</div>';
@@ -2331,7 +2425,9 @@ async function loadReview() {
     document.getElementById('review-orders-tbody').innerHTML =
       '<tr><td colspan="12" class="text-center text-gray-500 py-3 text-xs">—</td></tr>';
     renderReviewSuggestions([]);
-    renderReviewFactorSlices([]);
+    renderReviewConditionSlices([]);
+    renderReviewPerformanceReview({});
+    renderReviewScoreCorrelation({});
     return;
   }
   const realizedNum = summary.total_realized_pnl != null ? Number(summary.total_realized_pnl) : null;
@@ -2347,9 +2443,16 @@ async function loadReview() {
     },
     {label: '总胜率', value: summary.win_rate != null ? (summary.win_rate * 100).toFixed(1) + '%' : '-'},
     {
-      label: '资本回报率（均值）',
-      value: summary.avg_roe != null ? (summary.avg_roe * 100).toFixed(1) + '%' : '-',
+      label: '已实现 ROE（均值）',
+      value: (summary.avg_realized_roe ?? summary.avg_roe) != null
+        ? ((summary.avg_realized_roe ?? summary.avg_roe) * 100).toFixed(1) + '%' : '-',
       hint: '已实现盈亏 / 入场冻结保证金（行权价×100×张数）',
+    },
+    {
+      label: '真实年化回报（均值）',
+      value: summary.avg_annualized_return != null
+        ? (summary.avg_annualized_return * 100).toFixed(1) + '%' : '-',
+      hint: '按每笔持有天数年化后的回报均值',
     },
     {
       label: '开仓权利金合计',
@@ -2383,8 +2486,13 @@ async function loadReview() {
     </div>
   `).join('');
 
-  renderReviewSuggestions(summary.setting_suggestions || []);
-  renderReviewFactorSlices(summary.factor_slices || []);
+  const suggRows = suggestionsPayload.suggestions?.length
+    ? suggestionsPayload.suggestions
+    : (summary.setting_suggestions || []);
+  renderReviewSuggestions(suggRows);
+  renderReviewConditionSlices(summary.factor_slices || []);
+  renderReviewPerformanceReview(summary.performance_review || {});
+  renderReviewScoreCorrelation(summary.score_pnl_correlation || {});
 
   const breakdown = summary.by_close_reason || [];
   document.getElementById('breakdown-tbody').innerHTML = breakdown.map(row => `
@@ -2483,6 +2591,8 @@ window.recalcClosedEntryInsights = async function (positionId) {
     clearTimeout(tid);
   }
 };
+
+document.getElementById('btn-review-apply-filters')?.addEventListener('click', () => loadReview());
 
 document.getElementById('btn-refresh-entry-snapshots')?.addEventListener('click', async () => {
   if (!confirm(
