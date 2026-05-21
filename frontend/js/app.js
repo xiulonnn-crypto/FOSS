@@ -9,6 +9,8 @@ const APP_TIME_ZONE = 'America/New_York';
 
 // ---- State ----
 let _currentPage = 'screener';
+let _screenerCandidateSource = 'pool';
+let _screenerCandidateRows = [];
 let _pendingEntry = null;  // candidate row for entry modal
 let _settings = {};
 let _lastScanRun = null;
@@ -184,14 +186,19 @@ function connectSSE() {
   const dot = document.getElementById('sse-dot');
   const label = document.getElementById('sse-label');
 
+  // Guard: only show toasts for events that arrive AFTER the catch-up replay is done.
+  let _ready = false;
+
   const es = new EventSource(`${API}/api/events/stream`);
+  es.addEventListener('connected', () => { _ready = true; });
   es.addEventListener('event', e => {
     try {
       const ev = JSON.parse(e.data);
-      const lvl = ev.level === 'danger' ? 'danger' : ev.level === 'warn' ? 'warn' : 'info';
-      toast(ev.title, lvl);
       scheduleRefreshBell();
       if (_currentPage === 'positions') scheduleLoadPositions();
+      if (!_ready) return;
+      const lvl = ev.level === 'danger' ? 'danger' : ev.level === 'warn' ? 'warn' : 'info';
+      toast(ev.title, lvl);
     } catch {}
   });
   es.onopen = () => {
@@ -373,7 +380,8 @@ async function fetchOptionPoolRows() {
   return normalizePoolOptionsResponse(await apiFetch(`/api/pool/options${optionPoolFilterQuery()}`));
 }
 
-async function refreshPoolSections(scanRun = _lastScanRun) {
+async function refreshPoolSections(scanRun = _lastScanRun, options = {}) {
+  const skipCandidates = Boolean(options.skipCandidates);
   const [underlyingsRaw, poolRows, watchesRaw] = await Promise.all([
     apiFetch('/api/pool/underlyings'),
     fetchOptionPoolRows(),
@@ -383,7 +391,11 @@ async function refreshPoolSections(scanRun = _lastScanRun) {
   const watches = normalizeOptionWatchesResponse(watchesRaw);
   _lastPoolRows = poolRows;
   renderUnderlyings(underlyings);
-  renderCandidates(poolRows, scanRun, { source: 'pool' });
+  if (!skipCandidates) {
+    _screenerCandidateSource = 'pool';
+    _screenerCandidateRows = poolRows;
+    renderCandidates(poolRows, scanRun, { source: 'pool' });
+  }
   renderOptionWatches(watches);
 }
 
@@ -663,7 +675,7 @@ function candidateActionButtonsHtml(row, source) {
     `<button onclick='openEntryModal(${encoded})'
       class="bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded text-xs">入场</button>`,
   ];
-  if (source === 'pool' && row.option_pool_id != null) {
+  if ((source === 'pool' || source === 'specific') && row.option_pool_id != null) {
     if (row.is_watched && row.watch_id) {
       buttons.push(`<button onclick='ignoreOptionWatch(${Number(row.watch_id)})'
         class="bg-gray-700 hover:bg-gray-600 text-gray-100 px-2 py-1 rounded text-xs">忽略</button>`);
@@ -681,6 +693,8 @@ function renderCandidates(rows, scanRun, options = {}) {
   const tbody = document.getElementById('candidates-tbody');
   const empty = document.getElementById('candidates-empty');
   const source = options.source || 'scan';
+  _screenerCandidateSource = source;
+  _screenerCandidateRows = rows || [];
   renderScanDiagnostics(scanRun);
   if (!rows || rows.length === 0) {
     tbody.innerHTML = '';
@@ -810,6 +824,93 @@ function entrySignalMetricCardHtml(title, items) {
   </div>`;
 }
 
+/**
+ * RSI color coding for sell-put timing:
+ *   ≤ 25 → deep oversold (best)   → emerald
+ *   ≤ 35 → oversold (good)        → teal
+ *   ≤ 50 → mild pullback          → sky
+ *   ≤ 70 → neutral                → gray
+ *   > 70 → overbought (caution)   → amber
+ *   > 80 → extreme overbought     → red
+ */
+function rsiColorClass(rsi) {
+  if (rsi == null) return 'text-gray-400';
+  if (rsi <= 25) return 'text-emerald-300 font-semibold';
+  if (rsi <= 35) return 'text-teal-300';
+  if (rsi <= 50) return 'text-sky-300';
+  if (rsi <= 70) return 'text-gray-300';
+  if (rsi <= 80) return 'text-amber-300';
+  return 'text-red-300 font-semibold';
+}
+
+function rsiLabel(rsi) {
+  if (rsi == null) return '-';
+  if (rsi <= 25) return rsi.toFixed(1) + ' ↓↓超卖';
+  if (rsi <= 35) return rsi.toFixed(1) + ' ↓超卖';
+  if (rsi <= 50) return rsi.toFixed(1) + ' 偏弱';
+  if (rsi <= 70) return rsi.toFixed(1);
+  if (rsi <= 80) return rsi.toFixed(1) + ' ↑超买';
+  return rsi.toFixed(1) + ' ↑↑超买';
+}
+
+function entrySignalTimingCardHtml(vol, timing) {
+  const rsi14 = timing.rsi_14 != null ? timing.rsi_14 : null;
+  const rsi6  = timing.rsi_6  != null ? timing.rsi_6  : null;
+  const rsi12 = timing.rsi_12 != null ? timing.rsi_12 : null;
+  const bb    = timing.bb_distance_pct;
+
+  const primaryRsi = rsi14 != null ? rsi14 : rsi6;
+  const primaryLabel = rsi14 != null ? 'RSI(14) ★' : (rsi6 != null ? 'RSI(6)' : null);
+
+  const rows = [];
+
+  rows.push(`<div class="flex justify-between gap-3">
+    <span class="text-gray-500">IV</span>
+    <span class="text-gray-200 text-right">${vol.iv != null ? (vol.iv * 100).toFixed(1) + '%' : '-'}</span>
+  </div>`);
+  rows.push(`<div class="flex justify-between gap-3">
+    <span class="text-gray-500">IV Rank</span>
+    <span class="text-gray-200 text-right">${vol.iv_rank != null ? fmt(vol.iv_rank, 0) : '-'}</span>
+  </div>`);
+
+  if (primaryRsi != null) {
+    rows.push(`<div class="flex justify-between gap-3">
+      <span class="text-indigo-300/80 text-[11px]">${escapeHtml(primaryLabel)}</span>
+      <span class="${rsiColorClass(primaryRsi)} text-right text-[11px]">${rsiLabel(primaryRsi)}</span>
+    </div>`);
+  }
+  if (rsi14 != null && rsi6 != null) {
+    rows.push(`<div class="flex justify-between gap-3">
+      <span class="text-gray-500">RSI(6)</span>
+      <span class="${rsiColorClass(rsi6)} text-right text-xs">${rsi6.toFixed(1)}</span>
+    </div>`);
+  }
+  if (rsi12 != null) {
+    rows.push(`<div class="flex justify-between gap-3">
+      <span class="text-gray-500">RSI(12)</span>
+      <span class="${rsiColorClass(rsi12)} text-right text-xs">${rsi12.toFixed(1)}</span>
+    </div>`);
+  }
+  rows.push(`<div class="flex justify-between gap-3">
+    <span class="text-gray-500">布林距离</span>
+    <span class="${bb != null && bb < 0 ? 'text-amber-300' : bb != null && bb <= 5 ? 'text-teal-300' : 'text-gray-200'} text-right">${bb != null ? bb.toFixed(1) + '%' : '-'}</span>
+  </div>`);
+
+  const hint = primaryRsi != null
+    ? (primaryRsi <= 35
+        ? '<div class="mt-1.5 text-[10px] text-teal-400/80">超卖区间 — 卖 Put 时机较优，IV 溢价充足</div>'
+        : primaryRsi >= 70
+          ? '<div class="mt-1.5 text-[10px] text-amber-400/80">超买区间 — 建议等待回落后考虑卖 Put</div>'
+          : '')
+    : '';
+
+  return `<div class="rounded border border-gray-700 bg-gray-900/40 p-3">
+    <div class="mb-2 text-xs font-semibold text-indigo-200">波动与时机</div>
+    <div class="space-y-1 text-xs">${rows.join('') || '<div class="text-gray-500">暂无数据</div>'}</div>
+    ${hint}
+  </div>`;
+}
+
 function entrySignalReasonsHtml(signal) {
   const reasons = Array.isArray(signal.reasons) ? signal.reasons : [];
   if (!reasons.length) return '<div class="text-xs text-gray-500">暂无原因明细</div>';
@@ -861,12 +962,7 @@ function openEntrySignalModal(row) {
         ['价差', liq.spread_pct != null ? (liq.spread_pct * 100).toFixed(1) + '%' : '-'],
         ['未平仓量', String(liq.open_interest ?? row.open_interest ?? '-')],
       ])}
-      ${entrySignalMetricCardHtml('波动与时机', [
-        ['IV', vol.iv != null ? (vol.iv * 100).toFixed(1) + '%' : '-'],
-        ['IV Rank', vol.iv_rank != null ? fmt(vol.iv_rank, 0) : '-'],
-        ['RSI 6', timing.rsi_6 != null ? fmt(timing.rsi_6, 1) : '-'],
-        ['布林距离', timing.bb_distance_pct != null ? fmt(timing.bb_distance_pct, 1) + '%' : '-'],
-      ])}
+      ${entrySignalTimingCardHtml(vol, timing)}
       ${entrySignalMetricCardHtml('数据质量', [
         ['评级', dq.quality_grade || row.quality_grade || '-'],
         ['质量分', String(dq.quality_score ?? row.quality_score ?? '-')],
@@ -889,13 +985,22 @@ function closeEntrySignalModal() {
 document.getElementById('entry-signal-close')?.addEventListener('click', closeEntrySignalModal);
 
 async function watchOptionPool(optionPoolId) {
-  await apiFetch('/api/watch/options', {
+  const watch = await apiFetch('/api/watch/options', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ option_pool_id: optionPoolId }),
   });
   toast('已加入观察池', 'info');
-  await refreshPoolSections();
+  const fromSpecific = _screenerCandidateSource === 'specific';
+  await refreshPoolSections(_lastScanRun, { skipCandidates: fromSpecific });
+  if (fromSpecific && _screenerCandidateRows.length) {
+    const updated = _screenerCandidateRows.map(row =>
+      Number(row.option_pool_id) === Number(optionPoolId)
+        ? { ...row, is_watched: true, watch_id: watch.id }
+        : row
+    );
+    renderCandidates(updated, _lastScanRun, { source: 'specific' });
+  }
 }
 
 async function ignoreOptionPool(optionPoolId) {
@@ -910,7 +1015,16 @@ async function ignoreOptionPool(optionPoolId) {
     body: JSON.stringify({ ignore_reason: 'user_ignored_from_pool' }),
   });
   toast('已忽略该合约', 'info');
-  await refreshPoolSections();
+  const fromSpecific = _screenerCandidateSource === 'specific';
+  await refreshPoolSections(_lastScanRun, { skipCandidates: fromSpecific });
+  if (fromSpecific && _screenerCandidateRows.length) {
+    const updated = _screenerCandidateRows.map(row =>
+      Number(row.option_pool_id) === Number(optionPoolId)
+        ? { ...row, is_watched: false, watch_id: null }
+        : row
+    );
+    renderCandidates(updated, _lastScanRun, { source: 'specific' });
+  }
 }
 
 async function ignoreOptionWatch(watchId) {
@@ -920,7 +1034,16 @@ async function ignoreOptionWatch(watchId) {
     body: JSON.stringify({ ignore_reason: 'user_ignored' }),
   });
   toast('观察项已忽略', 'info');
-  await refreshPoolSections();
+  const fromSpecific = _screenerCandidateSource === 'specific';
+  await refreshPoolSections(_lastScanRun, { skipCandidates: fromSpecific });
+  if (fromSpecific && _screenerCandidateRows.length) {
+    const updated = _screenerCandidateRows.map(row =>
+      Number(row.watch_id) === Number(watchId)
+        ? { ...row, is_watched: false, watch_id: null }
+        : row
+    );
+    renderCandidates(updated, _lastScanRun, { source: 'specific' });
+  }
 }
 
 async function saveWatchTargets(watchId) {
@@ -2425,58 +2548,95 @@ async function loadReview() {
     return;
   }
   const realizedNum = summary.total_realized_pnl != null ? Number(summary.total_realized_pnl) : null;
+  const unrealizedNum = summary.total_unrealized_pnl != null ? Number(summary.total_unrealized_pnl) : null;
+  const totalPnlNum = summary.total_pnl != null
+    ? Number(summary.total_pnl)
+    : (realizedNum != null || unrealizedNum != null)
+      ? (realizedNum || 0) + (unrealizedNum || 0)
+      : null;
   const realizedCls = realizedNum == null ? 'text-indigo-300' : realizedNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const unrealizedCls = unrealizedNum == null ? 'text-gray-400' : unrealizedNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const totalPnlCls = totalPnlNum == null ? 'text-gray-400' : totalPnlNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
   const maeeNum = summary.avg_maee != null ? Number(summary.avg_maee) : null;
   const mfeNum = summary.avg_mfe != null ? Number(summary.avg_mfe) : null;
-  const cards = [
+  const roeNum = (summary.avg_realized_roe ?? summary.avg_roe) != null
+    ? Number(summary.avg_realized_roe ?? summary.avg_roe) : null;
+  const sortinoNum = summary.sortino_ratio != null ? Number(summary.sortino_ratio) : null;
+  const winRateNum = summary.win_rate != null ? Number(summary.win_rate) : null;
+  const sharpeNum = summary.sharpe_ratio != null ? Number(summary.sharpe_ratio) : null;
+  function _pnlSign(n) { return n >= 0 ? '+' : ''; }
+  function _pctCls(n) { return n == null ? 'text-gray-400' : n >= 0 ? 'text-emerald-400' : 'text-rose-400'; }
+  const metricCards = [
     {
-      label: '结转盈亏',
-      value: realizedNum == null ? '-' : '$' + realizedNum.toFixed(0),
+      label: '胜率',
+      value: winRateNum != null ? (winRateNum * 100).toFixed(1) + '%' : '—',
+      valueClass: 'text-indigo-300',
+      subs: [
+        { label: '交易笔数', value: summary.trade_count != null ? String(summary.trade_count) : '—', cls: 'text-gray-300' },
+      ],
+    },
+    {
+      label: '平仓盈亏',
+      value: realizedNum != null ? _pnlSign(realizedNum) + '$' + realizedNum.toFixed(0) : '—',
       valueClass: realizedCls,
-      hint: '所有已结束持仓的已实现盈亏合计',
+      subs: [
+        {
+          label: '持仓盈亏',
+          value: unrealizedNum != null ? _pnlSign(unrealizedNum) + '$' + unrealizedNum.toFixed(0) : '—',
+          cls: unrealizedCls,
+        },
+        {
+          label: '总盈亏',
+          value: totalPnlNum != null ? _pnlSign(totalPnlNum) + '$' + totalPnlNum.toFixed(0) : '—',
+          cls: totalPnlCls,
+        },
+      ],
     },
-    {label: '总胜率', value: summary.win_rate != null ? (summary.win_rate * 100).toFixed(1) + '%' : '-'},
-    {
-      label: '已实现 ROE（均值）',
-      value: (summary.avg_realized_roe ?? summary.avg_roe) != null
-        ? ((summary.avg_realized_roe ?? summary.avg_roe) * 100).toFixed(1) + '%' : '-',
-      hint: '已实现盈亏 / 入场冻结保证金（行权价×100×张数）',
-    },
-    {
-      label: '真实年化回报（均值）',
-      value: summary.avg_annualized_return != null
-        ? (summary.avg_annualized_return * 100).toFixed(1) + '%' : '-',
-      hint: '按每笔持有天数年化后的回报均值',
-    },
-    {
-      label: '开仓权利金合计',
-      value: summary.total_premium != null ? '$' + summary.total_premium.toFixed(0) : '-',
-      hint: '各笔开仓应收权利金相加',
-    },
-    {label: '交易笔数', value: summary.trade_count ?? '-'},
     {
       label: '夏普比率',
-      value: summary.sharpe_ratio != null ? summary.sharpe_ratio.toFixed(2) : '-',
-      hint: '逐笔 ROE 均值 / 标准差，衡量风险调整后收益',
-    },
-    {
-      label: '索提诺比率',
-      value: summary.sortino_ratio != null ? summary.sortino_ratio.toFixed(2) : '-',
-      hint: '逐笔 ROE 均值 / 下行标准差，排除上行波动',
+      value: sharpeNum != null ? sharpeNum.toFixed(2) : '—',
+      valueClass: 'text-indigo-300',
+      tooltip: '以逐笔已实现 ROE 的均值除以标准差，衡量每承担一单位波动所获得的收益，值越高说明收益稳定性越强。索提诺比率仅对亏损笔计算下行标准差，对盈利笔更友好。',
+      subs: [
+        {
+          label: '已实现 ROE',
+          value: roeNum != null ? _pnlSign(roeNum) + (roeNum * 100).toFixed(1) + '%' : '—',
+          cls: _pctCls(roeNum),
+        },
+        { label: '索提诺比率', value: sortinoNum != null ? sortinoNum.toFixed(2) : '—', cls: 'text-gray-300' },
+      ],
     },
     {
       label: 'MAEE / MFE 均值',
-      value: (maeeNum != null && mfeNum != null)
-        ? (maeeNum * 100).toFixed(1) + '% / +' + (mfeNum * 100).toFixed(1) + '%'
-        : '-',
-      hint: '最大浮亏比例均值 / 最大浮盈比例均值（优先 intraday_bs，无则雷达快照）',
+      value: maeeNum != null || mfeNum != null
+        ? (maeeNum != null ? (maeeNum * 100).toFixed(1) + '%' : '—')
+          + ' / '
+          + (mfeNum != null ? '+' + (mfeNum * 100).toFixed(1) + '%' : '—')
+        : '—',
+      valueClass: 'text-indigo-300',
+      tooltip: 'MAEE（最大浮亏均值）：持仓期内曾出现的最大亏损幅度均值，负值越大说明越容易深套。MFE（最大浮盈均值）：持仓期内最大盈利幅度均值，反映止盈空间利用率。优先使用日内 BS 回放数据，无则使用雷达快照。',
+      subs: [],
     },
   ];
-  document.getElementById('review-summary').innerHTML = cards.map(c => `
-    <div class="bg-gray-800 rounded-lg p-4 text-center">
-      <div class="text-xl font-bold ${c.valueClass || 'text-indigo-300'} leading-tight">${c.value}</div>
-      <div class="text-xs text-gray-400 mt-1 leading-snug">${c.label}</div>
-      ${c.hint ? `<div class="text-[10px] text-gray-500 mt-0.5 leading-tight">${c.hint}</div>` : ''}
+  document.getElementById('review-summary').innerHTML = metricCards.map(c => `
+    <div class="bg-gray-800 rounded-lg p-3 flex flex-col min-w-0">
+      <div class="flex items-start justify-between mb-1">
+        <span class="text-[11px] text-gray-400 leading-none">${c.label}</span>
+        ${c.tooltip ? `
+        <span class="relative group ml-1 shrink-0 cursor-help" tabindex="0">
+          <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-gray-600 text-[9px] text-gray-500 group-hover:border-gray-400 group-hover:text-gray-300 transition-colors leading-none select-none">?</span>
+          <span class="pointer-events-none absolute right-0 top-5 z-30 w-56 rounded bg-gray-900 border border-gray-600 px-2.5 py-2 text-[10px] text-gray-300 leading-snug shadow-xl opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">${c.tooltip}</span>
+        </span>` : ''}
+      </div>
+      <div class="text-xl font-bold ${c.valueClass} tabular-nums leading-snug py-0.5 flex-1 flex items-center">${c.value}</div>
+      ${c.subs.length ? `
+      <div class="mt-2 pt-1.5 border-t border-gray-700/60 space-y-0.5">
+        ${c.subs.map(s => `
+        <div class="flex items-center justify-between gap-1">
+          <span class="text-[10px] text-gray-500 truncate">${s.label}</span>
+          <span class="text-[10px] tabular-nums ${s.cls || 'text-gray-400'} shrink-0">${s.value}</span>
+        </div>`).join('')}
+      </div>` : ''}
     </div>
   `).join('');
 
@@ -2976,7 +3136,18 @@ function renderAttrDrawer(attr, snap, diag) {
         ['Theta（日衰）', fmtNumStr(snapshotData.theta, 4)],
         ['入场标的价', snapshotData.spot != null ? `$${fmtNumStr(snapshotData.spot, 2)}` : null],
         ['入场 DTE', snapshotData.dte != null ? `${snapshotData.dte} 天` : null],
-        ['RSI(6)', fmtNumStr(snapshotData.rsi_6, 1)],
+        ['RSI(14) ★', (() => {
+          const v = fmtNumStr(snapshotData.rsi_14, 1);
+          if (v == null) return null;
+          const n = Number(snapshotData.rsi_14);
+          return `<span class="${rsiColorClass(n)} tabular-nums">${rsiLabel(n)}</span>`;
+        })(), true],
+        ['RSI(6)', (() => {
+          const v = fmtNumStr(snapshotData.rsi_6, 1);
+          if (v == null) return null;
+          const n = Number(snapshotData.rsi_6);
+          return `<span class="${rsiColorClass(n)} tabular-nums">${v}</span>`;
+        })(), true],
         ['RSI(12)', fmtNumStr(snapshotData.rsi_12, 1)],
         ['RSI(24)', fmtNumStr(snapshotData.rsi_24, 1)],
         ['距布林带下轨', bbHtml, true],

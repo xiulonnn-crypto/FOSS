@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import statistics
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
@@ -901,3 +902,70 @@ def test_summary_avg_maee_mfe_prefers_intraday_bs_over_radar_snapshots(tmp_path)
 
     assert data["avg_maee"] == pytest.approx(-0.15, abs=0.001)
     assert data["avg_mfe"] == pytest.approx(0.225, abs=0.001)
+
+
+def test_review_summary_includes_open_unrealized_and_total_pnl(tmp_path):
+    db_path = tmp_path / "open_pnl.db"
+    init_database(db_path)
+    repo = Repo(db_path)
+    app = create_app(db_path=db_path)
+    app.config["TESTING"] = True
+
+    closed_id = repo.insert_position({
+        "symbol": "AAPL",
+        "expiration": "2026-06-20",
+        "strike": 150.0,
+        "contracts": 1,
+        "open_at": "2026-05-01T14:30:00+00:00",
+        "open_premium": 2.0,
+        "open_candidate_id": None,
+        "state": "OPEN",
+        "notes": None,
+    })
+    repo.close_position(closed_id, "CLOSED_EARLY", 1.0, "manual", 100.0,
+                        close_at="2026-05-10T14:30:00+00:00")
+
+    open_id = repo.insert_position({
+        "symbol": "MU",
+        "expiration": "2026-06-18",
+        "strike": 600.0,
+        "contracts": 1,
+        "open_at": "2026-05-21T13:43:00+00:00",
+        "open_premium": 16.5,
+        "open_candidate_id": None,
+        "state": "OPEN",
+        "notes": None,
+    })
+    repo.insert_exit_signal({
+        "schema": "exit_signal_v1",
+        "position_id": open_id,
+        "action": "HOLD",
+        "severity": "info",
+        "urgency_score": 12,
+        "summary": "hold",
+        "metrics": {"unrealized_pnl_usd": 70.0},
+        "generated_at": "2026-05-21T15:00:00+00:00",
+    })
+
+    with app.test_client() as c:
+        data = c.get("/api/review/summary").get_json()
+
+    assert data["total_realized_pnl"] == pytest.approx(100.0)
+    assert data["total_unrealized_pnl"] == pytest.approx(70.0)
+    assert data["total_pnl"] == pytest.approx(170.0)
+    assert data["open_position_count"] == 1
+
+
+def test_compute_sortino_ratio_single_downside():
+    from app.api.routes_review import _compute_sortino_ratio
+
+    roes = [0.01, 0.02, -0.007]
+    sortino = _compute_sortino_ratio(roes)
+    assert sortino is not None
+    assert sortino == pytest.approx(statistics.mean(roes) / 0.007, rel=0.01)
+
+
+def test_compute_sortino_ratio_no_downside():
+    from app.api.routes_review import _compute_sortino_ratio
+
+    assert _compute_sortino_ratio([0.01, 0.02, 0.03]) is None

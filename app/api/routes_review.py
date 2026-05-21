@@ -437,6 +437,51 @@ def _build_setting_suggestions(factor_slices: List[Dict[str, Any]]) -> List[Dict
     return suggestions[:4]
 
 
+def _open_positions_unrealized_pnl(repo: Optional[Repo]) -> Dict[str, Any]:
+    """Aggregate unrealized P&L from OPEN positions (cached exit_signal marks)."""
+    if repo is None:
+        return {
+            "open_position_count": 0,
+            "marked_open_count": 0,
+            "total_unrealized_pnl": None,
+        }
+    opens = repo.list_positions(state="OPEN")
+    total = 0.0
+    marked = 0
+    for pos in opens:
+        signal = pos.get("exit_signal_payload") or {}
+        metrics = signal.get("metrics") if isinstance(signal, dict) else {}
+        pnl = _safe_float(metrics.get("unrealized_pnl_usd")) if isinstance(metrics, dict) else None
+        if pnl is not None:
+            total += pnl
+            marked += 1
+    unrealized: Optional[float]
+    if marked > 0:
+        unrealized = round(total, 2)
+    elif opens:
+        unrealized = None
+    else:
+        unrealized = 0.0
+    return {
+        "open_position_count": len(opens),
+        "marked_open_count": marked,
+        "total_unrealized_pnl": unrealized,
+    }
+
+
+def _compute_sortino_ratio(roi_list: List[float]) -> Optional[float]:
+    if not roi_list:
+        return None
+    mean_roi = statistics.mean(roi_list)
+    downside = [r for r in roi_list if r < 0]
+    if not downside:
+        return None
+    downside_dev = math.sqrt(sum(r * r for r in downside) / len(downside))
+    if downside_dev == 0:
+        return None
+    return mean_roi / downside_dev
+
+
 def _compute_summary(
     positions: List[Dict[str, Any]],
     repo: Optional[Repo],
@@ -448,6 +493,11 @@ def _compute_summary(
     min_sample = int(filt.get("min_sample", 5))
     settings = settings or {}
 
+    open_pnl = _open_positions_unrealized_pnl(repo)
+    total_unrealized_pnl = open_pnl["total_unrealized_pnl"]
+    total_realized_rounded: Optional[float] = None
+    total_pnl: Optional[float] = None
+
     if not positions:
         return {
             "trade_count": 0,
@@ -458,6 +508,9 @@ def _compute_summary(
             "avg_annualized_return": None,
             "total_premium": None,
             "total_realized_pnl": None,
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "total_pnl": total_unrealized_pnl if total_unrealized_pnl is not None else None,
+            "open_position_count": open_pnl["open_position_count"],
             "by_close_reason": [],
             "sharpe_ratio": None,
             "sortino_ratio": None,
@@ -510,19 +563,7 @@ def _compute_summary(
         if std != 0:
             sharpe_ratio = statistics.mean(roi_list) / std
 
-    # Sortino ratio: mean(roi) / stdev(downside)
-    sortino_ratio: Optional[float] = None
-    if roi_list:
-        mean_roi = statistics.mean(roi_list)
-        downside = [r for r in roi_list if r < 0]
-        if downside and len(downside) >= 2:
-            std_down = statistics.stdev(downside)
-            if std_down != 0:
-                sortino_ratio = mean_roi / std_down
-        elif downside and len(downside) == 1:
-            # single downside — use population std (the value itself relative to 0)
-            # standard practice: skip if can't compute stdev
-            sortino_ratio = None
+    sortino_ratio = _compute_sortino_ratio(roi_list)
 
     # MAE / MFE: prefer intraday_bs (daily H/L × BS, same source as drawer) per position;
     # fall back to radar_snapshots MIN/MAX for positions without intraday_bs.
@@ -598,6 +639,13 @@ def _compute_summary(
         for s in suggestions
     ]
 
+    total_realized_rounded = round(sum_realized, 2)
+    if total_realized_rounded is not None or total_unrealized_pnl is not None:
+        total_pnl = round(
+            (total_realized_rounded or 0.0) + (total_unrealized_pnl or 0.0),
+            2,
+        )
+
     return {
         "trade_count": trade_count,
         "win_rate": win_rate,
@@ -606,7 +654,10 @@ def _compute_summary(
         "avg_realized_roe": avg_roe,
         "avg_annualized_return": avg_annualized_return,
         "total_premium": total_premium,
-        "total_realized_pnl": round(sum_realized, 2),
+        "total_realized_pnl": total_realized_rounded,
+        "total_unrealized_pnl": total_unrealized_pnl,
+        "total_pnl": total_pnl,
+        "open_position_count": open_pnl["open_position_count"],
         "by_close_reason": by_reason,
         "sharpe_ratio": sharpe_ratio,
         "sortino_ratio": sortino_ratio,

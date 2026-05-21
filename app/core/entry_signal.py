@@ -220,18 +220,61 @@ def _add_watch_target_reasons(add: Any, row: Dict[str, Any], watch_row: Optional
 
 
 def _add_timing_reasons(add: Any, row: Dict[str, Any]) -> None:
+    # RSI(14) Wilder — industry-standard momentum oscillator.
+    # For Cash-Secured Short Put sellers: oversold = ideal entry (high IV, mean-reversion edge).
+    # Thresholds follow tastytrade / ThinkorSwim / OptionAlpha convention: 30 / 50 / 70.
+    rsi_14 = _to_float(row.get("rsi_14"))
     rsi_6 = _to_float(row.get("rsi_6"))
+
+    primary_rsi = rsi_14 if rsi_14 is not None else rsi_6
+
+    if primary_rsi is not None:
+        rsi_label = "RSI(14)" if rsi_14 is not None else "RSI(6)"
+        if primary_rsi <= 25:
+            add(
+                "timing_deeply_oversold", "timing", "positive",
+                f"{rsi_label} 深度超卖，卖 Put 时机极佳：IV 溢价高、均值回归概率大",
+                current=primary_rsi, threshold=25, passed=True,
+            )
+        elif primary_rsi <= 35:
+            add(
+                "timing_oversold", "timing", "positive",
+                f"{rsi_label} 处于超卖区间，卖 Put 入场时机良好",
+                current=primary_rsi, threshold=35, passed=True,
+            )
+        elif primary_rsi <= 45:
+            add(
+                "timing_pullback", "timing", "positive",
+                f"{rsi_label} 偏弱但未达超卖，入场时机尚可",
+                current=primary_rsi, threshold=45, passed=True,
+            )
+        elif primary_rsi >= 80:
+            add(
+                "timing_overbought_extreme", "timing", "warn",
+                f"{rsi_label} 极度超买，标的短期可能大幅回调，慎开新 Put",
+                current=primary_rsi, threshold=80, passed=False,
+            )
+        elif primary_rsi >= 70:
+            add(
+                "timing_overbought", "timing", "warn",
+                f"{rsi_label} 进入超买区间，追价风险偏高，建议等待回落后再考虑卖 Put",
+                current=primary_rsi, threshold=70, passed=False,
+            )
+
     bb_distance = _to_float(row.get("bb_distance_pct"))
-    if rsi_6 is not None:
-        if rsi_6 >= 75:
-            add("timing_overbought", "timing", "warn", "短期 RSI 偏热，追价风险较高", current=rsi_6, threshold=75, passed=False)
-        elif rsi_6 <= 35:
-            add("timing_pullback", "timing", "positive", "短期 RSI 显示回落，卖 Put 安全垫更值得关注", current=rsi_6, threshold=35, passed=True)
     if bb_distance is not None:
         if bb_distance < 0:
-            add("timing_below_lower_band", "timing", "warn", "价格跌破布林下轨，需防范趋势性下跌", current=bb_distance, threshold=0, passed=False)
-        elif bb_distance <= 8:
-            add("timing_near_lower_band", "timing", "positive", "价格接近布林下轨，入场位置相对克制", current=bb_distance, threshold=8, passed=True)
+            add(
+                "timing_below_lower_band", "timing", "warn",
+                "价格跌破布林下轨，短期趋势偏空；若 RSI 同步超卖则为潜在反弹点，需结合判断",
+                current=bb_distance, threshold=0, passed=False,
+            )
+        elif bb_distance <= 5:
+            add(
+                "timing_near_lower_band", "timing", "positive",
+                "价格贴近布林下轨，入场位置相对克制，安全垫历史分位较高",
+                current=bb_distance, threshold=5, passed=True,
+            )
 
 
 def _status_for(
@@ -330,6 +373,7 @@ def _metrics(row: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             "iv_rank_source": row.get("iv_rank_source"),
         },
         "timing": {
+            "rsi_14": _to_float(row.get("rsi_14")),
             "rsi_6": _to_float(row.get("rsi_6")),
             "rsi_12": _to_float(row.get("rsi_12")),
             "rsi_24": _to_float(row.get("rsi_24")),

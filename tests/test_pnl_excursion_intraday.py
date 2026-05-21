@@ -501,6 +501,61 @@ def test_single_day_with_identical_hl(mock_iv, mock_hl, repo, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Cross-day: stale snapshot.spot must not inflate MFE via false anchor
+# ---------------------------------------------------------------------------
+
+@patch("app.core.pnl_excursion_intraday._entry_minute_close")
+@patch("app.core.pnl_excursion_intraday._fetch_stock_daily_hl")
+@patch("app.core.pnl_excursion_intraday._fetch_eod_iv_map")
+def test_cross_day_stale_snap_spot_does_not_inflate_mfe(mock_iv, mock_hl, mock_entry_close, repo, monkeypatch):
+    """
+    MU-like case: snapshot.spot=724 but fill-time spot≈791; open=$23 close=$22.5 (+2.2%).
+
+    With stale snap spot + snapshot IV anchor, MFE was falsely ~71%.  After aligning anchor
+    to fill (entry spot + implied IV), MFE should reflect daily H/L vs ~0% entry, not anchor drift.
+    """
+    monkeypatch.delenv("MASSIVE_API_KEY", raising=False)
+    pid = repo.insert_position({
+        "symbol": "MU",
+        "expiration": "2026-06-18",
+        "strike": 620.0,
+        "contracts": 1,
+        "open_at": "2026-05-14T18:52:00+00:00",
+        "open_premium": 23.0,
+        "open_candidate_id": None,
+        "state": "OPEN",
+        "notes": None,
+    })
+    repo.close_position(
+        pid, "CLOSED_EARLY", 22.5, "manual", 48.0,
+        close_at="2026-05-21T13:30:00+00:00",
+    )
+    repo.save_open_snapshot(pid, {"spot": 724.145, "iv": 0.8923})
+
+    mock_entry_close.return_value = 791.055
+    mock_hl.return_value = [
+        (date(2026, 5, 14), 775.63, 812.00),
+        (date(2026, 5, 15), 719.00, 749.59),
+        (date(2026, 5, 18), 663.25, 757.00),
+        (date(2026, 5, 19), 652.21, 725.95),
+        (date(2026, 5, 20), 700.66, 735.68),
+        (date(2026, 5, 21), 732.23, 764.90),
+    ]
+    mock_iv.return_value = {}
+
+    enrich_closed_position_intraday_bs(repo, pid)
+
+    b = (repo.get_open_snapshot(pid) or {}).get("intraday_bs")
+    assert b is not None
+    close_pnl = (23.0 - 22.5) / 23.0
+    mfe = b["mfe_pnl_pct"]
+    assert mfe is not None
+    assert mfe < 0.50, f"MFE {mfe} inflated by stale anchor (expected well below 50%)"
+    assert mfe >= close_pnl - 1e-6
+    assert mfe == pytest.approx(0.284795, abs=0.02)
+
+
+# ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
 

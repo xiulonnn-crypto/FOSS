@@ -25,3 +25,10 @@ def test_screener_includes_entry_signal_filter_column_and_modal():
     assert "开仓信号" in html
     assert 'id="entry-signal-modal"' in html
     assert "开仓决策卡" in html
+
+
+def test_screener_specific_search_candidates_support_watch_action():
+    js = (Path(__file__).resolve().parents[1] / "frontend" / "js" / "app.js").read_text()
+    assert "source === 'specific'" in js
+    assert "watchOptionPool" in js
+    assert "_screenerCandidateSource" in js

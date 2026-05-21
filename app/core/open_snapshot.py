@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from app.core.technicals import compute_bb_lower_distance_pct, compute_rsi
+from app.core.technicals import compute_bb_lower_distance_pct, compute_rsi, compute_rsi_wilder
 from app.core.time_et import APP_TZ
 from app.db.repo import Repo
 
@@ -121,20 +121,82 @@ def position_open_datetime(pos: Dict[str, Any]) -> Optional[datetime]:
     return parse_instant_utc(pos.get("open_at"))
 
 
+def _entry_minute_close(symbol: str, entry_dt: datetime) -> Optional[float]:
+    """
+    Close price of the last intraday bar (1m/5m/1h) at or before ``entry_dt``.
+
+    Falls back gracefully: 1m within 10d, 5m within 59d, 1h within 730d.
+    Returns None when entry is too old for yfinance intraday history.
+    """
+    try:
+        import yfinance as yf
+        from datetime import timezone as _tz
+
+        su = entry_dt.astimezone(_tz.utc)
+        now = datetime.now(_tz.utc)
+        age_days = (now - su).total_seconds() / 86400.0
+
+        if age_days <= 10:
+            interval = "1m"
+        elif age_days <= 59:
+            interval = "5m"
+        elif age_days <= 730:
+            interval = "1h"
+        else:
+            return None
+
+        entry_date = entry_dt.astimezone(APP_TZ).date()
+        pad_start = (entry_date - timedelta(days=1)).isoformat()
+        pad_end = (entry_date + timedelta(days=1)).isoformat()
+
+        hist = yf.Ticker(symbol).history(
+            start=pad_start,
+            end=pad_end,
+            interval=interval,
+            auto_adjust=True,
+        )
+        if hist is None or hist.empty:
+            return None
+
+        best_close: Optional[float] = None
+        for ts, row in hist.iterrows():
+            try:
+                import pandas as pd
+                t = pd.Timestamp(ts)
+                if t.tzinfo is None:
+                    t = t.tz_localize(APP_TZ)
+                ts_utc = t.astimezone(_tz.utc).to_pydatetime()
+            except Exception:
+                continue
+            if ts_utc <= su:
+                v = float(row["Close"])
+                if v > 0:
+                    best_close = v
+        return best_close
+    except Exception as exc:
+        _LOG.info("open_snapshot: intraday close fetch skipped for %s: %s", symbol, exc)
+        return None
+
+
 def closes_through_entry(symbol: str, entry_dt: datetime) -> Optional[List[float]]:
     """
-    Daily adjusted closes from oldest through last session on or before entry (US Eastern calendar).
+    Adjusted closes from oldest through the moment of entry (US Eastern calendar).
+
+    Prior days: daily 4pm closes.
+    Entry day: close of the last intraday bar (1m/5m/1h) at or before ``entry_dt``,
+    so the indicator reflects only information available at the actual open time.
+    Falls back to the previous trading day's close when intraday history is unavailable.
     """
     try:
         import yfinance as yf
 
         entry_date = entry_dt.astimezone(APP_TZ).date()
         start = entry_date - timedelta(days=400)
-        end_excl = entry_date + timedelta(days=1)
+        # Fetch only completed days strictly before the entry date.
         ticker = yf.Ticker(symbol)
         hist = ticker.history(
             start=start.isoformat(),
-            end=end_excl.isoformat(),
+            end=entry_date.isoformat(),  # exclusive → last bar is entry_date - 1
             interval="1d",
             auto_adjust=True,
         )
@@ -143,8 +205,16 @@ def closes_through_entry(symbol: str, entry_dt: datetime) -> Optional[List[float
         closes: List[float] = []
         for ts, row in hist.iterrows():
             bar_date = ts.date() if hasattr(ts, "date") else ts
-            if bar_date <= entry_date:
+            if bar_date < entry_date:
                 closes.append(float(row["Close"]))
+
+        # Append the entry-moment price from intraday data (no forward-look).
+        intraday_close = _entry_minute_close(symbol, entry_dt)
+        if intraday_close is not None:
+            closes.append(intraday_close)
+        # If intraday not available (position too old), leave the series as-is.
+        # Indicators will be computed from prior-day data only.
+
         if len(closes) < 7:
             return None
         return closes
@@ -195,12 +265,15 @@ def build_open_snapshot_dict(
         if closes:
             rsi_6 = compute_rsi(closes, 6)
             rsi_12 = compute_rsi(closes, 12)
+            rsi_14 = compute_rsi_wilder(closes, 14)
             rsi_24 = compute_rsi(closes, 24)
             bb_dist = compute_bb_lower_distance_pct(closes, window=20)
             if rsi_6 is not None:
                 snapshot["rsi_6"] = rsi_6
             if rsi_12 is not None:
                 snapshot["rsi_12"] = rsi_12
+            if rsi_14 is not None:
+                snapshot["rsi_14"] = rsi_14
             if rsi_24 is not None:
                 snapshot["rsi_24"] = rsi_24
             if bb_dist is not None:

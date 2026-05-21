@@ -29,7 +29,7 @@ BLOCKER_REASONS = frozenset(
 
 def build_option_pool_row(
     candidate_or_blocked_row: Dict[str, Any],
-    scan_run_id: int,
+    scan_run_id: Optional[int],
     now: datetime,
 ) -> Dict[str, Any]:
     """Normalize a scanner row into the option_pool row contract."""
@@ -83,7 +83,7 @@ def build_option_pool_row(
         "iv_rank_source": _optional_str(candidate_or_blocked_row.get("iv_rank_source")),
         "first_seen_at": now_iso,
         "last_seen_at": now_iso,
-        "last_scan_run_id": int(scan_run_id),
+        "last_scan_run_id": int(scan_run_id) if scan_run_id is not None else None,
         "latest_candidate_id": _first_present_int(
             candidate_or_blocked_row,
             ("latest_candidate_id", "candidate_id", "id"),

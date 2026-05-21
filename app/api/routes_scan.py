@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date
-from typing import Optional
+from datetime import date, datetime, timezone
+from typing import Dict, Optional
 
 from flask import Blueprint, current_app, jsonify, request
 
 from app.core.data_quality import evaluate_contract_quality, infer_quality_from_candidate_snapshot
 from app.core.entry_signal import build_entry_signal
 from app.core.greeks import fill_greeks
+from app.core.option_pool import build_option_pool_row
 from app.core.strategy import compute_iv_rank, derive_csp_candidate_row
 from app.core.symbols import normalize_ticker_symbol
 from app.core.types import OptionContract, Quote
@@ -40,6 +41,42 @@ def _pick_put_near_strike(
     if best_d > tol:
         return None
     return best
+
+
+def _enrich_candidate_with_pool(row: dict, pool: Optional[Dict[str, Any]]) -> dict:
+    """Attach option_pool / watch fields so screener actions match the contract pool."""
+    if not pool:
+        return row
+    out = dict(row)
+    out["option_pool_id"] = pool.get("id")
+    out["is_watched"] = bool(pool.get("is_watched") or pool.get("watch_id"))
+    if pool.get("watch_id") is not None:
+        out["watch_id"] = pool.get("watch_id")
+    if pool.get("status"):
+        out["status"] = pool.get("status")
+    if pool.get("entry_signal") and not out.get("entry_signal"):
+        out["entry_signal"] = pool.get("entry_signal")
+    return out
+
+
+def _sync_specific_search_pool(repo: Repo, row: dict, settings: dict) -> Optional[Dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    pool_row = build_option_pool_row({**row, "right": "P"}, scan_run_id=None, now=now)
+    result = repo.upsert_option_pool_rows([pool_row])
+    upserted = result.get("upserted_ids") or []
+    if not upserted:
+        return None
+    option_pool_id = int(upserted[0])
+    pool = repo.get_option_pool(option_pool_id)
+    if not pool:
+        return None
+    try:
+        signal = build_entry_signal(pool, settings=settings, today=date.today())
+        repo.insert_entry_signal(signal)
+        pool = repo.get_option_pool(option_pool_id) or pool
+    except Exception as exc:
+        log.debug("scan_specific: entry signal skipped for pool_id=%s: %s", option_pool_id, exc)
+    return pool
 
 
 def _candidate_wire(row: dict, settings: Optional[dict] = None) -> dict:
@@ -273,6 +310,8 @@ def scan_specific_put():
             settings=settings,
             today=date.today(),
         )
+        pool = _sync_specific_search_pool(repo, row, settings)
+        wired = _enrich_candidate_with_pool(_candidate_wire(row), pool)
 
         run_meta = {
             "id": None,
@@ -298,7 +337,7 @@ def scan_specific_put():
         return jsonify(
             {
                 "schema": "scan_latest_v2",
-                "candidates": [_candidate_wire(row)],
+                "candidates": [wired],
                 "run": run_meta,
             }
         )

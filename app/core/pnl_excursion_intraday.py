@@ -9,6 +9,10 @@ Hold calendar [open_date_et .. close_date_et] (America/New_York):
   BS IV is **implied from ``open_premium`` at snapshot spot** when solvable; otherwise snapshot IV.
   Anchor mark then aligns with the fill so MAE/MFE are not polluted by snapshot IV vs premium mismatch.
 
+* **Cross-day**: Yahoo **daily** ``Low``/``High``; IV from Massive EOD back-fit per day when
+  available (else snapshot IV).  Anchor uses fill-time spot (intraday close at ``open_at``) and
+  implied IV from ``open_premium`` so stale ``snapshot.spot`` does not inflate MFE.
+
 First series point: BS at snapshot ``spot`` using the same IV as window extremes; with fill-implied
 IV this reproduces ``open_premium`` (~0% anchor). Without ``spot``, anchor ``0.0``.
 """
@@ -21,6 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.greeks import black_scholes_price, implied_vol_black_scholes_put
+from app.core.open_snapshot import _entry_minute_close
 from app.core.option_ticker_osi import format_osi_option_ticker
 from app.core.pnl_excursion import (
     relative_mae_mfe_from_pnls_chronologic,
@@ -411,11 +416,13 @@ def enrich_closed_position_intraday_bs(repo: Repo, position_id: int) -> None:
     except (TypeError, ValueError):
         snap_spot = 0.0
 
-    # For hold-window mode prefer the yfinance bar Open at open_at as a more accurate
-    # proxy for the stock price at fill time.  Snapshot.spot may be stale (captured hours
-    # earlier during the radar scan).  Fall back to snap_spot when bar data unavailable.
+    # Prefer fill-time stock price over snapshot.spot (often stale vs actual open_at).
+    # hold_window: bar Open at open_at; cross-day: last intraday close at/before open_at.
     if hw_entry_approx and hw_entry_approx > 0:
         entry_spot = hw_entry_approx
+    elif open_utc is not None:
+        minute_close = _entry_minute_close(symbol, open_utc)
+        entry_spot = minute_close if minute_close and minute_close > 0 else snap_spot
     else:
         entry_spot = snap_spot
 
@@ -450,13 +457,24 @@ def enrich_closed_position_intraday_bs(repo: Repo, position_id: int) -> None:
         return iv_map.get(day, fallback_iv)
 
     anchor_pnl = 0.0
-    if entry_spot > 0:
-        iv0 = iv_for(open_d)
+    if entry_spot > 0 and open_premium > 0:
         dte0 = max((exp_d - open_d).days, 0)
         t0 = max(dte0 / 365.0, 1e-9)
-        mark0 = black_scholes_price(entry_spot, strike, _RISK_FREE_RATE, iv0, t0, "P")
-        if mark0 > 0:
-            anchor_pnl = short_put_premium_pnl_pct(open_premium, mark0)
+        anchor_iv = implied_vol_black_scholes_put(
+            entry_spot,
+            strike,
+            _RISK_FREE_RATE,
+            t0,
+            open_premium,
+        )
+        if anchor_iv is not None:
+            # Align anchor with recorded fill premium (≈0% excursion at entry).
+            anchor_pnl = 0.0
+        else:
+            iv0 = iv_for(open_d)
+            mark0 = black_scholes_price(entry_spot, strike, _RISK_FREE_RATE, iv0, t0, "P")
+            if mark0 > 0:
+                anchor_pnl = short_put_premium_pnl_pct(open_premium, mark0)
 
     pnl_series: List[float] = [anchor_pnl]
     for bar_d, lo, hi in day_bars:

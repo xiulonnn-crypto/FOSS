@@ -191,9 +191,56 @@ def test_scan_specific_returns_one_row(mock_provider_cls, client):
     row = data["candidates"][0]
     assert row["symbol"] == "AAPL"
     assert abs(row["strike"] - 150.0) < 1e-9
+    assert row.get("option_pool_id") is not None
+    assert row.get("is_watched") is False
     run = data.get("run") or {}
     assert run.get("trigger") == "specific"
     mock_provider_cls.return_value.get_option_chain.assert_called_once()
+
+
+@patch("app.api.routes_scan.fill_greeks", lambda c, *_a, **_kw: c)
+@patch("app.api.routes_scan.YFinanceProvider")
+def test_scan_specific_watch_flow(mock_provider_cls, client):
+    exp = date.today() + timedelta(days=40)
+    c = OptionContract(
+        symbol="AAPL",
+        expiration=exp,
+        strike=150.0,
+        right="P",
+        bid=1.5,
+        ask=1.6,
+        last=None,
+        iv=0.3,
+        delta=-0.15,
+        theta=-0.01,
+        vega=0.02,
+        gamma=0.001,
+        open_interest=120,
+        volume=10,
+    )
+    inst = MagicMock()
+    inst.get_quote.return_value = Quote(symbol="AAPL", spot=175.0, asof=datetime.now(timezone.utc))
+    inst.get_expirations.return_value = [exp]
+    inst.get_option_chain.return_value = [c]
+    mock_provider_cls.return_value = inst
+
+    scan = client.post(
+        "/api/scan/specific",
+        json={"symbol": "AAPL", "expiration": exp.isoformat(), "strike": 150.0},
+    )
+    assert scan.status_code == 200
+    row = scan.get_json()["candidates"][0]
+    pool_id = row["option_pool_id"]
+    watch = client.post("/api/watch/options", json={"option_pool_id": pool_id})
+    assert watch.status_code == 201
+    watches = client.get("/api/watch/options").get_json()["watches"]
+    assert any(int(w.get("option_pool_id") or 0) == int(pool_id) for w in watches)
+    row_after = client.post(
+        "/api/scan/specific",
+        json={"symbol": "AAPL", "expiration": exp.isoformat(), "strike": 150.0},
+    ).get_json()["candidates"][0]
+    assert row_after.get("is_watched") is True
+    assert row_after.get("watch_id") == watch.get_json()["id"]
 
 
 def test_scan_latest_empty_database(client):

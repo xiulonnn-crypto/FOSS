@@ -16,7 +16,12 @@ from app.core.greeks import (
 )
 from app.core.massive_closed_enrichment import enrich_closed_position_open_snapshot_massive
 from app.core.pnl_excursion_intraday import enrich_closed_position_intraday_bs
-from app.core.open_snapshot import build_open_snapshot_dict, closes_through_entry, position_open_datetime
+from app.core.open_snapshot import (
+    build_open_snapshot_dict,
+    closes_through_entry,
+    position_open_datetime,
+    _entry_minute_close,
+)
 from app.core.time_et import APP_TZ, parse_instant_utc
 from app.core.types import OptionContract
 from app.db.repo import Repo
@@ -245,10 +250,94 @@ def recalculate_closed_position_insights(
     except Exception as exc:
         _LOG.warning("entry_recalc: intraday_bs enrich failed (non-fatal) position_id=%s: %s", position_id, exc)
 
+    # Build close_snapshot (出场环境快照) from BS replay data.
+    close_snapshot_built = False
+    try:
+        close_snapshot_built = _build_and_save_close_snapshot(
+            repo=repo,
+            pos=pos,
+            position_id=position_id,
+            close_dt=close_dt,
+            close_d=close_d,
+            strike=strike,
+            open_premium=open_premium,
+            exp_d=exp_d,
+            iv=float(iv),
+            risk_free_rate=risk_free_rate,
+        )
+    except Exception as exc:
+        _LOG.warning("entry_recalc: close_snapshot build failed (non-fatal) position_id=%s: %s", position_id, exc)
+
     return {
         "ok": True,
         "position_id": position_id,
         "open_snapshot_keys": sorted(merged.keys()),
         "radar_rows_inserted": inserted,
         "implied_iv": float(iv),
+        "close_snapshot_built": close_snapshot_built,
     }
+
+
+def _build_and_save_close_snapshot(
+    *,
+    repo: Repo,
+    pos: Dict[str, Any],
+    position_id: int,
+    close_dt: datetime,
+    close_d: date,
+    strike: float,
+    open_premium: float,
+    exp_d: date,
+    iv: float,
+    risk_free_rate: float,
+) -> bool:
+    """
+    Reconstruct the exit environment snapshot using the BS replay model and save it
+    via ``repo.save_position_close_snapshot``.  Returns True when saved.
+    """
+    # Resolve underlying spot at the close moment (intraday bar preferred).
+    close_spot: Optional[float] = _entry_minute_close(pos.get("symbol", ""), close_dt)
+    if close_spot is None or close_spot <= 0:
+        # Fall back to daily close of close_date via the same bars used for replay.
+        bars = daily_underlying_closes(str(pos.get("symbol", "")), close_d, close_d)
+        if bars:
+            close_spot = float(bars[-1][1])
+
+    close_premium_val = float(pos.get("close_premium") or 0)
+    realized_pnl = float(pos.get("realized_pnl") or 0)
+    close_reason = str(pos.get("close_reason") or "manual")
+    close_notes = pos.get("notes")
+
+    mark: Dict[str, Any] = {
+        "mark_basis": "bs_daily_close_constant_iv_replay",
+        "option_mid": close_premium_val if close_premium_val > 0 else None,
+        "current_mid": close_premium_val if close_premium_val > 0 else None,
+    }
+    if close_spot and close_spot > 0:
+        dte_close = max((exp_d - close_d).days, 0)
+        t_close = max(dte_close / 365.0, 1e-6)
+        delta_close = black_scholes_delta(close_spot, strike, risk_free_rate, iv, t_close, "P")
+        margin_buf = (close_spot - strike) / close_spot
+        pnl_pct = 1.0 - (close_premium_val / open_premium) if open_premium > 0 and close_premium_val >= 0 else None
+        mark.update({
+            "spot": round(float(close_spot), 6),
+            "iv": round(float(iv), 6),
+            "delta": None if math.isnan(delta_close) else round(float(delta_close), 6),
+            "margin_buffer": round(float(margin_buf), 6),
+            "pnl_pct": round(float(pnl_pct), 6) if pnl_pct is not None else None,
+        })
+
+    close_snapshot = {
+        "schema": "position_close_snapshot_v1",
+        "closed_at": close_dt.isoformat(),
+        "close_premium": close_premium_val if close_premium_val > 0 else None,
+        "selected_close_reason": close_reason,
+        "close_notes": close_notes,
+        "realized_pnl": realized_pnl,
+        "exit_signal_id": None,
+        "exit_signal": None,
+        "mark": mark,
+        "replay_model": "bs_daily_close_constant_iv",
+    }
+    repo.save_position_close_snapshot(position_id, close_snapshot)
+    return True

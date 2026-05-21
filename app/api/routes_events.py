@@ -47,10 +47,12 @@ def stream():
     def generate():
         q = bus.subscribe()
         try:
-            # Send buffered unread events first
+            # Replay buffered unread events (catch-up); client should NOT toast these.
             repo: Repo = current_app.config["REPO"]
             for evt in repo.list_unread_events(limit=20):
                 yield f"event: event\ndata: {json.dumps(evt, default=str)}\n\n"
+            # Sentinel: all catch-up events have been flushed; client may now show toasts.
+            yield "event: connected\ndata: {}\n\n"
 
             last_heartbeat = time.time()
             while True:

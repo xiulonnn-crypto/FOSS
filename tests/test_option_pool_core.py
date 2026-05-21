@@ -58,6 +58,11 @@ def test_build_option_pool_row_normalizes_candidate_to_new_put_row():
     assert row["quality_flags"] == ["provider_delayed"]
 
 
+def test_build_option_pool_row_allows_missing_scan_run_id():
+    row = build_option_pool_row(_candidate(), scan_run_id=None, now=NOW)
+    assert row["last_scan_run_id"] is None
+
+
 def test_build_option_pool_row_blocks_quality_c_and_allows_partial_metrics():
     row = build_option_pool_row(
         _candidate(
