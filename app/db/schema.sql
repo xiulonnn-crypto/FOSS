@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS candidates (
   quality_flags   TEXT,
   quote_age_seconds INTEGER,
   greeks_source   TEXT,
-  iv_rank_source  TEXT
+  iv_rank_source  TEXT,
+  state_features  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(scan_run_id, score DESC);
 
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS option_pool (
   entry_signal_summary TEXT,
   entry_signal_generated_at TEXT,
   entry_signal_payload TEXT,
+  state_features      TEXT,
   UNIQUE(symbol, expiration, strike, right)
 );
 CREATE INDEX IF NOT EXISTS idx_option_pool_symbol_status ON option_pool(symbol, status);
@@ -213,7 +215,33 @@ CREATE TABLE IF NOT EXISTS exit_signals (
 CREATE INDEX IF NOT EXISTS idx_exit_signals_position_latest ON exit_signals(position_id, is_latest, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_exit_signals_event_dedup ON exit_signals(position_id, action, suggested_close_reason, severity);
 
--- 11. 持仓动作日志
+-- 11. 市场 IV / Skew 快照（阶段一特征工程）
+CREATE TABLE IF NOT EXISTS market_iv_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL,
+  as_of_date TEXT NOT NULL,
+  iv30 REAL,
+  atm_strike REAL,
+  skew REAL,
+  vix REAL,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(symbol, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_market_iv_snapshots_symbol_date ON market_iv_snapshots(symbol, as_of_date DESC);
+
+-- 12. 候选/持仓统一特征快照
+CREATE TABLE IF NOT EXISTS feature_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  as_of TEXT NOT NULL,
+  features_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_feature_snapshots_entity ON feature_snapshots(entity_type, entity_id, as_of DESC);
+
+-- 13. 持仓动作日志
 CREATE TABLE IF NOT EXISTS position_action_logs (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   position_id     INTEGER NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
@@ -225,7 +253,7 @@ CREATE TABLE IF NOT EXISTS position_action_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_position_action_logs_position ON position_action_logs(position_id, created_at DESC);
 
--- 12. 事件中心
+-- 14. 事件中心
 CREATE TABLE IF NOT EXISTS events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at TEXT NOT NULL,

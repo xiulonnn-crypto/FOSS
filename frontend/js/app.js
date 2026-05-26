@@ -16,6 +16,8 @@ let _settings = {};
 let _lastScanRun = null;
 let _lastPoolRows = [];
 let _lastWatchRows = [];
+/** Terminal watch rows stay in DB but are hidden from the screener watch grid. */
+const ACTIVE_WATCH_STATUSES = ['WATCHING', 'READY'];
 
 // ================================================================
 // Router
@@ -358,6 +360,15 @@ function normalizeOptionWatchesResponse(raw) {
   return raw && Array.isArray(raw.watches) ? raw.watches : Array.isArray(raw) ? raw : [];
 }
 
+function activeWatchPoolQuery() {
+  return `?status=${ACTIVE_WATCH_STATUSES.join(',')}`;
+}
+
+function filterActiveWatchRows(rows) {
+  const active = new Set(ACTIVE_WATCH_STATUSES);
+  return (rows || []).filter(row => active.has(String(row?.status || '').toUpperCase()));
+}
+
 function optionPoolFilterQuery() {
   const params = new URLSearchParams();
   const status = document.getElementById('option-pool-status-filter')?.value || 'NEW,ACTIVE';
@@ -385,10 +396,10 @@ async function refreshPoolSections(scanRun = _lastScanRun, options = {}) {
   const [underlyingsRaw, poolRows, watchesRaw] = await Promise.all([
     apiFetch('/api/pool/underlyings'),
     fetchOptionPoolRows(),
-    apiFetch('/api/watch/options'),
+    apiFetch(`/api/watch/options${activeWatchPoolQuery()}`),
   ]);
   const underlyings = normalizeUnderlyingsResponse(underlyingsRaw);
-  const watches = normalizeOptionWatchesResponse(watchesRaw);
+  const watches = filterActiveWatchRows(normalizeOptionWatchesResponse(watchesRaw));
   _lastPoolRows = poolRows;
   renderUnderlyings(underlyings);
   if (!skipCandidates) {
@@ -470,12 +481,12 @@ async function loadScreener() {
   const [underlyingsRaw, poolRows, watchesRaw, scanData] = await Promise.all([
     apiFetch('/api/pool/underlyings'),
     fetchOptionPoolRows(),
-    apiFetch('/api/watch/options'),
+    apiFetch(`/api/watch/options${activeWatchPoolQuery()}`),
     fetchScanLatest(),
   ]);
   await syncScoreFormulaTip();
   const underlyings = normalizeUnderlyingsResponse(underlyingsRaw);
-  const watches = normalizeOptionWatchesResponse(watchesRaw);
+  const watches = filterActiveWatchRows(normalizeOptionWatchesResponse(watchesRaw));
   const symbols = underlyings.filter(isWatchlistEntryEnabled).map(w => w.symbol).join(', ');
   document.getElementById('watchlist-input').value = symbols;
 
@@ -620,6 +631,68 @@ function qualityBadgeHtml(row) {
   return `<span title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" class="inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium ${cls}">${label}${score}</span>`;
 }
 
+function getStateFeatures(row) {
+  const raw = row?.state_features;
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_e) {
+      return {};
+    }
+  }
+  return {};
+}
+
+function formatFeatureNumber(value, digits = 1) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(digits) : '-';
+}
+
+function formatFeaturePct(value, digits = 1) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(digits)}%` : '-';
+}
+
+function regimeBadgeHtml(regime) {
+  const key = String(regime || 'unknown').toLowerCase();
+  const map = {
+    high_vol: ['高波', 'bg-red-500/15 text-red-300 border-red-500/30'],
+    low_vol: ['低波', 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'],
+    neutral: ['中性', 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'],
+    unknown: ['VIX待定', 'bg-gray-600/30 text-gray-300 border-gray-500/40'],
+  };
+  const [label, cls] = map[key] || map.unknown;
+  return `<span class="inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium ${cls}">${label}</span>`;
+}
+
+function stateFeaturesHtml(row) {
+  const f = getStateFeatures(row);
+  const hasAny = Object.keys(f).length > 0;
+  if (!hasAny) {
+    return '<span class="text-[11px] text-gray-500" title="重新扫描并等待 IV 快照积累后会显示状态特征">待积累</span>';
+  }
+  const title = [
+    `Regime：${f.regime || 'unknown'}`,
+    `VRP：${formatFeaturePct(f.vrp)}`,
+    `IV30：${formatFeaturePct(f.iv30)}`,
+    `HV30：${formatFeaturePct(f.hv30)}`,
+    `Skew：${formatFeaturePct(f.skew)}`,
+    `VIX：${formatFeatureNumber(f.vix, 1)}`,
+    `RSI14：${formatFeatureNumber(f.rsi_14, 1)}`,
+    `MACD乖离：${formatFeatureNumber(f.macd_bias_pct, 2)}%`,
+    `BB Z：${formatFeatureNumber(f.bb_zscore, 2)}`,
+  ].join('\n');
+  return `
+    <div title="${escapeAttr(title)}" class="flex min-w-[7rem] flex-col items-center gap-1 normal-case">
+      ${regimeBadgeHtml(f.regime)}
+      <div class="text-[11px] leading-tight text-gray-300">VRP <span class="${Number(f.vrp) > 0 ? 'text-emerald-300' : 'text-gray-300'}">${formatFeaturePct(f.vrp)}</span></div>
+      <div class="text-[11px] leading-tight text-gray-400">RSI ${formatFeatureNumber(f.rsi_14, 0)} · BBZ ${formatFeatureNumber(f.bb_zscore, 1)}</div>
+    </div>`;
+}
+
 function topRejectionReasons(diagnostics, limit = 3) {
   const counts = diagnostics?.totals?.rejection_counts || {};
   return Object.entries(counts)
@@ -729,6 +802,7 @@ function renderCandidates(rows, scanRun, options = {}) {
           ${getEntrySignal(r).summary ? `<span class="max-w-[10rem] break-words text-[11px] normal-case text-gray-400">${escapeHtml(getEntrySignal(r).summary)}</span>` : ''}
         </div>
       </td>
+      <td>${stateFeaturesHtml(r)}</td>
       <td>${r.expiration || '-'}</td>
       <td>${fmt(r.strike, 2)}</td>
       <td>${fmt(r.mid, 2)}</td>
@@ -764,7 +838,7 @@ function watchDistanceText(option, watch) {
 }
 
 function renderOptionWatches(rows) {
-  _lastWatchRows = rows || [];
+  _lastWatchRows = filterActiveWatchRows(rows);
   const grid = document.getElementById('option-watch-grid');
   if (!grid) return;
   if (!_lastWatchRows.length) {
@@ -1239,6 +1313,7 @@ function openEntryModal(row) {
   _pendingEntry = row;
   const info = document.getElementById('modal-info');
   const q = getCandidateQuality(row);
+  const features = getStateFeatures(row);
   const qualityWarn = ['B', 'UNKNOWN'].includes(String(q.grade || 'unknown').toUpperCase())
     ? `<div class="md:col-span-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">数据质量为 ${qualityBadgeHtml(row)}，请核对行情源和报价后再确认。</div>`
     : '';
@@ -1252,6 +1327,9 @@ function openEntryModal(row) {
     <div><span class="text-gray-400">当前 Mid：</span>${fmt(row.mid, 2)}</div>
     <div><span class="text-gray-400">Delta：</span>${fmt(row.delta, 3)}</div>
     <div><span class="text-gray-400">年化ROI：</span>${row.annualized_roi ? (row.annualized_roi * 100).toFixed(1) + '%' : '-'}</div>
+    <div class="md:col-span-2"><span class="text-gray-400">状态特征：</span>${stateFeaturesHtml(row)}</div>
+    <div><span class="text-gray-400">IV30/HV30：</span>${formatFeaturePct(features.iv30)} / ${formatFeaturePct(features.hv30)}</div>
+    <div><span class="text-gray-400">Skew/VIX：</span>${formatFeaturePct(features.skew)} / ${formatFeatureNumber(features.vix, 1)}</div>
     ${qualityWarn}
     ${signalWarn}
   `;
@@ -1312,6 +1390,8 @@ document.getElementById('modal-confirm').addEventListener('click', async () => {
     if (signal.decision_score != null) body.entry_signal_score = signal.decision_score;
     if (signal.summary) body.entry_signal_summary = signal.summary;
     if (signal.schema === 'entry_signal_v1') body.entry_signal = signal;
+    const stateFeatures = getStateFeatures(pe);
+    if (Object.keys(stateFeatures).length) body.state_features = stateFeatures;
     const oa = document.getElementById('entry-open-at');
     if (oa && oa.value) {
       const iso = fromDatetimeLocalToIso(oa.value);

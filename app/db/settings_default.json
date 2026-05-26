@@ -36,7 +36,8 @@
     "screener_minutes": 0,
     "radar_minutes": 15,
     "settlement_time_et": "16:30",
-    "iv_refresh_time_et": "17:00"
+    "iv_refresh_time_et": "17:00",
+    "iv_snapshot_time_et": "17:05"
   },
   "provider": "yfinance",
   "entry_signal": {
@@ -51,5 +52,6 @@
   },
   "fees": {"usd_per_contract": 1.0},
   "risk_free_rate": 0.045,
-  "rv_by_symbol": {}
+  "rv_by_symbol": {},
+  "iv_by_symbol": {}
 }

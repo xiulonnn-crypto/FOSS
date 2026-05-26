@@ -90,6 +90,7 @@ def build_option_pool_row(
         ),
         "missed_scan_count": 0,
         "status": status,
+        "state_features": _normalize_state_features(candidate_or_blocked_row.get("state_features")),
     }
 
 
@@ -293,6 +294,20 @@ def _normalize_string_list(value: Any) -> List[str]:
     if isinstance(value, Iterable):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()]
+
+
+def _normalize_state_features(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def _to_optional_float(value: Any) -> Optional[float]:

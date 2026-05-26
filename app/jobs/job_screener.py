@@ -12,6 +12,7 @@ from app.core.data_quality import (
     merge_symbol_into_scan,
 )
 from app.core.entry_signal import build_entry_signal
+from app.core.features import compute_state_features
 from app.core.greeks import fill_greeks
 from app.core.option_pool import build_option_pool_row, evaluate_option_watch
 from app.core.time_et import et_timestamp_for_filename
@@ -61,6 +62,32 @@ def _update_underlying_scan_summary(repo: Repo, symbol: str, symbol_diag: dict) 
         )
     except Exception as exc:
         log.debug("screener: underlying summary update skipped for %s: %s", symbol, exc)
+
+
+def _build_symbol_state_features(
+    repo: Repo,
+    provider: MarketDataProvider,
+    symbol: str,
+    settings: dict,
+) -> Optional[dict]:
+    try:
+        closes = provider.get_historical_closes(symbol, days=400)
+    except Exception as exc:
+        log.debug("screener: historical closes unavailable for %s: %s", symbol, exc)
+        closes = []
+    if not closes:
+        return None
+    iv_snapshot = repo.latest_market_iv_snapshot(symbol)
+    rv_history = (settings.get("rv_by_symbol") or {}).get(symbol)
+    iv_history = (settings.get("iv_by_symbol") or {}).get(symbol)
+    return compute_state_features(
+        closes,
+        iv30=(iv_snapshot or {}).get("iv30") if iv_snapshot else None,
+        skew=(iv_snapshot or {}).get("skew") if iv_snapshot else None,
+        vix=(iv_snapshot or {}).get("vix") if iv_snapshot else None,
+        rv_history=rv_history,
+        iv_history=iv_history,
+    )
 
 
 def _sync_option_pool(
@@ -253,6 +280,7 @@ def run_screener(
                     asof=quote.asof,
                     iv_rank=iv_rank,
                 )
+                symbol_state_features = _build_symbol_state_features(repo, provider, symbol, settings)
 
                 earnings_date = None
                 earnings_known = None
@@ -295,6 +323,18 @@ def run_screener(
                         )
                         for row in scored:
                             row["scan_run_id"] = run_id
+                            if symbol_state_features is not None:
+                                features = dict(symbol_state_features)
+                                if features.get("iv30") is None and row.get("iv") is not None:
+                                    features = compute_state_features(
+                                        provider.get_historical_closes(symbol, days=400),
+                                        iv30=row.get("iv"),
+                                        skew=features.get("skew"),
+                                        vix=features.get("vix"),
+                                        rv_history=rv_data,
+                                        iv_history=(settings.get("iv_by_symbol") or {}).get(symbol),
+                                    )
+                                row["state_features"] = features
                         all_candidates.extend(scored)
                     except Exception as exc:
                         symbol_diag["errors"].append(
@@ -314,6 +354,15 @@ def run_screener(
         if all_candidates:
             try:
                 repo.insert_candidates(all_candidates)
+                for candidate in repo.list_candidates(run_id, limit=5000):
+                    features = candidate.get("state_features")
+                    if features:
+                        repo.insert_feature_snapshot(
+                            "candidate",
+                            int(candidate["id"]),
+                            features,
+                            as_of=datetime.now(timezone.utc).isoformat(),
+                        )
             except Exception as exc:
                 log.exception(
                     "screener: run_id=%d insert_candidates failed: %s", run_id, exc

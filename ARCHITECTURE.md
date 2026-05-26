@@ -9,7 +9,7 @@
 
 ## 2. 分层
 
-- `app/core`：纯业务与复盘算法——`strategy`、`data_quality`、`greeks`、`settlement`、`types`；持仓标记 `position_mark` / `radar_snapshot`；入场快照 `open_snapshot`（RSI/布林带等）；已平仓回放与 BS 反推 `entry_rehistory`；可选 Massive 日 K 增补 `massive_closed_enrichment` + OSI 编码 `option_ticker_osi`；美东与时区 `time_et`；`technicals`、`symbols`。
+- `app/core`：纯业务与复盘算法——`strategy`、`data_quality`、`features`、`greeks`、`settlement`、`types`；持仓标记 `position_mark` / `radar_snapshot`；入场快照 `open_snapshot`（RSI/布林带/状态特征等）；已平仓回放与 BS 反推 `entry_rehistory`；可选 Massive 日 K 增补 `massive_closed_enrichment` + OSI 编码 `option_ticker_osi`；美东与时区 `time_et`；`technicals`、`symbols`。
 - `app/data`：`MarketDataProvider`（`provider_base`、`provider_yfinance`；另有 `provider_tradier` / `provider_ibkr` 占位）；`massive_client`（REST v2 aggs、进程内 5 次/分钟限速，供已平仓抽屉增补，不经由通用 Provider）。
 - `app/jobs`：调度与编排。
 - `app/db`：SQLite schema 与 DAO（`settings_default.json` 含 `integrations.massive_enrich_closed` 等）。
@@ -33,6 +33,7 @@ worker.py :7001            Jobs ───────┘
   job_radar                 └─ POST 127.0.0.1:7000/api/internal/notify
   job_settlement
   job_iv_history
+  job_iv_snapshot
   /reload  → re-register jobs
   /healthz → {"ok":true}
 ```
@@ -42,6 +43,8 @@ worker.py :7001            Jobs ───────┘
 **复盘 Phase 5**：`GET /api/review/summary` 支持 `since`/`until`/`symbols`/`pool`/`min_sample` 筛选，返回 `slices`（九维条件切片）、`performance_review`、`score_pnl_correlation`、`avg_realized_roe` 与 `avg_annualized_return`；`GET/POST /api/review/suggestions` 提供可应用设置建议（原子 merge + worker `/reload`）。核心模块：`review_analytics`、`review_suggestions`、`close_reason_norm`。
 
 **扫描质量链路**：`job_screener` 在 `greeks.fill_greeks` 后调用 `strategy.score_csp_candidates_with_diagnostics`，同时写入候选快照与 `scan_runs.diagnostics`。`/api/scan/latest`、`/api/scan/run/:id`、`/api/scan/specific` 保持 `scan_latest_v2`，并在候选行上返回 flat 质量字段与 `data_quality` 嵌套对象；前端候选表、空状态与入场弹窗消费这些字段。
+
+**阶段一特征工程链路**：`job_iv_snapshot` 每个交易日记录观察名单标的的本地 `market_iv_snapshots`（ATM/近 ATM `iv30`、OTM Put/Call `skew` 与 `^VIX`），并维护 `settings.iv_by_symbol` 的 252 点滚动序列。`app/core/features.py` 将历史收盘价、RV/IV 序列与最新 IV 快照组合成 `state_features`（RSI14、MACD 乖离、布林带 Z-Score、HV30、IV30、VRP、Skew、VIX、Regime）。`job_screener` 将该特征写入 `candidates.state_features`、`option_pool.state_features` 与 `feature_snapshots`；`open_snapshot` 在确认开仓时固化入场特征，供后续复盘与 Walk-Forward 使用。
 
 **三层池链路**：`watchlist` 兼容旧观察名单并承担标的池；每轮扫描仍写 `candidates` 快照，同时 upsert `option_pool` 保存合约最新状态，并评估 `option_watchlist` 中的用户观察意图。新增 `app/core/option_pool.py` 纯规则模块，`routes_pool.py` 暴露 `/api/pool/*` 与 `/api/watch/options*`；观察池确认入场仍只写本地 `positions`，不连接券商、不自动下单。`worker.py` 启动时会执行一次轻量维护，调度器每日标记过期 pool/watch。
 
@@ -59,12 +62,12 @@ FOSS/
 ├── requirements.txt
 ├── .env.example            # 可选 TRADIER_*、MASSIVE_API_KEY 等（.gitignore 忽略 .env）
 ├── app/
-│   ├── core/              # data_quality, option_pool, entry_signal, greeks, strategy, settlement, types, technicals, symbols, time_et,
+│   ├── core/              # data_quality, features, option_pool, entry_signal, greeks, strategy, settlement, types, technicals, symbols, time_et,
 │   │                      # position_mark, radar_snapshot, open_snapshot, entry_rehistory,
 │   │                      # exit_signal, option_ticker_osi, massive_closed_enrichment
 │   ├── data/              # provider_base/yfinance/tradier/ibkr, massive_client
 │   ├── db/                # schema.sql, init_db.py, repo.py, paths.py, settings_default.json
-│   ├── jobs/              # job_screener, job_radar, job_settlement, job_iv_history, scheduler_config
+│   ├── jobs/              # job_screener, job_radar, job_settlement, job_iv_history, job_iv_snapshot, scheduler_config
 │   ├── api/               # routes_settings, routes_scan, routes_pool, routes_positions, routes_events, routes_review, internal_notify
 │   └── notify/            # bus.py (EventBus)
 ├── frontend/

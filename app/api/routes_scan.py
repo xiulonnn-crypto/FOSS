@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app.core.data_quality import evaluate_contract_quality, infer_quality_from_candidate_snapshot
 from app.core.entry_signal import build_entry_signal
+from app.core.features import compute_state_features
 from app.core.greeks import fill_greeks
 from app.core.option_pool import build_option_pool_row
 from app.core.strategy import compute_iv_rank, derive_csp_candidate_row
@@ -101,6 +102,13 @@ def _candidate_wire(row: dict, settings: Optional[dict] = None) -> dict:
         "greeks_source": out.get("greeks_source"),
         "iv_rank_source": out.get("iv_rank_source"),
     }
+    if isinstance(out.get("state_features"), str):
+        try:
+            import json
+            parsed = json.loads(out["state_features"])
+        except Exception:
+            parsed = None
+        out["state_features"] = parsed if isinstance(parsed, dict) else None
     return out
 
 
@@ -305,6 +313,20 @@ def scan_specific_put():
                 "iv_rank_source": quality.iv_rank_source,
             }
         )
+        try:
+            closes = provider.get_historical_closes(symbol, days=400)
+        except Exception:
+            closes = []
+        latest_iv = repo.latest_market_iv_snapshot(symbol)
+        if closes:
+            row["state_features"] = compute_state_features(
+                closes,
+                iv30=(latest_iv or {}).get("iv30") or row.get("iv"),
+                skew=(latest_iv or {}).get("skew") if latest_iv else None,
+                vix=(latest_iv or {}).get("vix") if latest_iv else None,
+                rv_history=rv_data,
+                iv_history=(settings.get("iv_by_symbol") or {}).get(symbol),
+            )
         row["entry_signal"] = build_entry_signal(
             {**row, "right": "P", "status": "ACTIVE"},
             settings=settings,

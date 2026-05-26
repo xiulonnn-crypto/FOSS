@@ -62,6 +62,9 @@ class PoolFakeProvider(MarketDataProvider):
     def get_iv_history(self, symbol: str, days: int = 252) -> List[Tuple[date, float]]:
         return [(date.today() - timedelta(days=i), 0.25 + i * 0.001) for i in range(days)]
 
+    def get_historical_closes(self, symbol: str, days: int = 400) -> List[float]:
+        return [150.0 + i * 0.1 for i in range(80)]
+
     def get_next_earnings(self, symbol: str) -> Optional[date]:
         return None
 
@@ -89,11 +92,17 @@ def test_screener_writes_candidates_and_option_pool(repo):
     assert pool_rows[0]["quality_grade"] in {"A", "B"}
     assert pool_rows[0]["entry_signal_status"] in {"OPENABLE", "WAIT"}
     assert pool_rows[0]["entry_signal"]["schema"] == "entry_signal_v1"
+    assert pool_rows[0].get("state_features") is not None
+    assert pool_rows[0]["state_features"]["rsi_14"] is not None
 
     meta = repo.get_scan_run_meta(run_id)
     assert meta["diagnostics"]["totals"]["option_pool_seen"] == 1
     assert meta["diagnostics"]["totals"]["option_pool_inserted"] == 1
     assert meta["diagnostics"]["totals"]["entry_signal_counts"]["generated"] == 1
+
+    feature = repo.latest_feature_snapshot("candidate", pool_rows[0]["latest_candidate_id"])
+    assert feature is not None
+    assert feature["features"]["regime"] in {"low_vol", "neutral", "high_vol", "unknown"}
 
 
 def test_second_scan_updates_same_option_pool_row(repo):

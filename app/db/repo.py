@@ -76,6 +76,8 @@ def _json_loads_any(value: Any) -> Any:
 def _candidate_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     candidate = dict(row)
     candidate["quality_flags"] = _json_loads_list(candidate.get("quality_flags"))
+    if "state_features" in candidate:
+        candidate["state_features"] = _json_loads_dict(candidate.get("state_features"))
     if candidate.get("quality_grade") is None:
         candidate["quality_grade"] = "unknown"
     return candidate
@@ -109,6 +111,8 @@ def _watchlist_from_row(row: sqlite3.Row) -> Dict[str, Any]:
 def _option_pool_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     item = dict(row)
     item["quality_flags"] = _json_loads_list(item.get("quality_flags"))
+    if "state_features" in item:
+        item["state_features"] = _json_loads_dict(item.get("state_features"))
     item["is_watched"] = bool(item.get("watch_id"))
     payload = _json_loads_dict(item.get("entry_signal_payload"))
     if payload:
@@ -134,6 +138,7 @@ def _option_watch_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     }
     if option:
         option["quality_flags"] = _json_loads_list(option.get("quality_flags"))
+        option["state_features"] = _json_loads_dict(option.get("state_features"))
         payload = _json_loads_dict(option.get("entry_signal_payload"))
         if payload:
             option["entry_signal"] = payload
@@ -208,6 +213,7 @@ _OPTION_POOL_COLUMNS = [
     "quote_age_seconds", "greeks_source", "iv_rank_source",
     "first_seen_at", "last_seen_at", "last_scan_run_id",
     "latest_candidate_id", "missed_scan_count", "status",
+    "state_features",
 ]
 
 
@@ -272,7 +278,8 @@ _OPTION_WATCH_SELECT = """
       op.entry_signal_score AS option_entry_signal_score,
       op.entry_signal_summary AS option_entry_signal_summary,
       op.entry_signal_generated_at AS option_entry_signal_generated_at,
-      op.entry_signal_payload AS option_entry_signal_payload
+      op.entry_signal_payload AS option_entry_signal_payload,
+      op.state_features AS option_state_features
     FROM option_watchlist ow
     JOIN option_pool op ON op.id = ow.option_pool_id
 """
@@ -335,6 +342,90 @@ class Repo:
         _deep_merge(current, partial)
         self.save_settings(current)
         return current
+
+    # ------------------------------------------------------------------
+    # Phase-one feature snapshots
+    # ------------------------------------------------------------------
+
+    def upsert_market_iv_snapshot(self, row: Dict[str, Any]) -> None:
+        symbol = normalize_ticker_symbol(row.get("symbol"))
+        if not symbol:
+            return
+        as_of_date = _date_text(row.get("as_of_date"))
+        with self._connect() as con:
+            con.execute(
+                """
+                INSERT INTO market_iv_snapshots(
+                    symbol, as_of_date, iv30, atm_strike, skew, vix, source
+                )
+                VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(symbol, as_of_date) DO UPDATE SET
+                    iv30=excluded.iv30,
+                    atm_strike=excluded.atm_strike,
+                    skew=excluded.skew,
+                    vix=excluded.vix,
+                    source=excluded.source
+                """,
+                (
+                    symbol,
+                    as_of_date,
+                    row.get("iv30"),
+                    row.get("atm_strike"),
+                    row.get("skew"),
+                    row.get("vix"),
+                    row.get("source"),
+                ),
+            )
+
+    def list_market_iv_snapshots(self, symbol: str, limit: int = 252) -> List[Dict[str, Any]]:
+        sym = normalize_ticker_symbol(symbol)
+        if not sym:
+            return []
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT * FROM market_iv_snapshots WHERE symbol=? "
+                "ORDER BY as_of_date DESC LIMIT ?",
+                (sym, int(limit)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def latest_market_iv_snapshot(self, symbol: str) -> Optional[Dict[str, Any]]:
+        rows = self.list_market_iv_snapshots(symbol, limit=1)
+        return rows[0] if rows else None
+
+    def insert_feature_snapshot(
+        self,
+        entity_type: str,
+        entity_id: int,
+        features: Dict[str, Any],
+        *,
+        as_of: Optional[str] = None,
+    ) -> int:
+        with self._connect() as con:
+            cur = con.execute(
+                "INSERT INTO feature_snapshots(entity_type, entity_id, as_of, features_json) "
+                "VALUES(?,?,?,?)",
+                (
+                    str(entity_type),
+                    int(entity_id),
+                    as_of or _now_utc(),
+                    json.dumps(features, ensure_ascii=False),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def latest_feature_snapshot(self, entity_type: str, entity_id: int) -> Optional[Dict[str, Any]]:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM feature_snapshots WHERE entity_type=? AND entity_id=? "
+                "ORDER BY as_of DESC, id DESC LIMIT 1",
+                (str(entity_type), int(entity_id)),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["features"] = _json_loads_dict(item.get("features_json")) or {}
+        return item
 
     # ------------------------------------------------------------------
     # Watchlist
@@ -504,6 +595,7 @@ class Repo:
             "breakeven", "margin_buffer", "score", "open_interest",
             "quality_grade", "quality_score", "quality_flags",
             "quote_age_seconds", "greeks_source", "iv_rank_source",
+            "state_features",
         ]
         placeholders = ",".join("?" * len(columns))
         col_str = ",".join(columns)
@@ -512,7 +604,7 @@ class Repo:
             prepared = []
             for col in columns:
                 value = row.get(col)
-                if col == "quality_flags" and not isinstance(value, str):
+                if col in {"quality_flags", "state_features"} and not isinstance(value, str):
                     value = _json_dumps_or_none(value)
                 prepared.append(value)
             values.append(prepared)
@@ -707,7 +799,7 @@ class Repo:
                         prepared[col] = row.get(col, 0)
                     elif col == "status":
                         prepared[col] = status
-                    elif col == "quality_flags":
+                    elif col in {"quality_flags", "state_features"}:
                         value = row.get(col, existing_dict.get(col))
                         prepared[col] = value if isinstance(value, str) else _json_dumps_or_none(value)
                     else:

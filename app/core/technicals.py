@@ -84,3 +84,67 @@ def compute_bb_lower_distance_pct(
     if last_close == 0:
         return None
     return round((last_close - lower_band) / last_close * 100, 2)
+
+
+def compute_bb_zscore(closes: List[float], window: int = 20) -> Optional[float]:
+    """Return last close's Z-score versus its Bollinger midline window."""
+    if len(closes) < window:
+        return None
+    recent = closes[-window:]
+    sma = sum(recent) / window
+    variance = sum((x - sma) ** 2 for x in recent) / window
+    std = math.sqrt(variance)
+    if std == 0:
+        return None
+    return round((recent[-1] - sma) / std, 6)
+
+
+def compute_hv(closes: List[float], window: int = 30) -> Optional[float]:
+    """Annualized historical volatility from the latest `window` simple returns."""
+    if len(closes) < window + 1:
+        return None
+    recent = closes[-(window + 1):]
+    returns: List[float] = []
+    for i in range(1, len(recent)):
+        prev = recent[i - 1]
+        cur = recent[i]
+        if prev <= 0 or cur <= 0:
+            return None
+        returns.append((cur / prev) - 1.0)
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / len(returns)
+    return round(math.sqrt(variance) * math.sqrt(252.0), 6)
+
+
+def compute_macd_bias_pct(
+    closes: List[float],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> Optional[float]:
+    """Return (MACD - signal line) as a percentage of the latest close."""
+    if len(closes) < slow + signal:
+        return None
+    last_close = closes[-1]
+    if last_close == 0:
+        return None
+    fast_ema = _ema_series(closes, fast)
+    slow_ema = _ema_series(closes, slow)
+    if len(fast_ema) != len(closes) or len(slow_ema) != len(closes):
+        return None
+    macd = [f - s for f, s in zip(fast_ema, slow_ema)]
+    signal_line = _ema_series(macd, signal)
+    if not signal_line:
+        return None
+    hist = macd[-1] - signal_line[-1]
+    return round(hist / last_close * 100.0, 6)
+
+
+def _ema_series(values: List[float], period: int) -> List[float]:
+    if not values or period <= 0:
+        return []
+    alpha = 2.0 / (period + 1.0)
+    out = [float(values[0])]
+    for value in values[1:]:
+        out.append((float(value) * alpha) + (out[-1] * (1.0 - alpha)))
+    return out

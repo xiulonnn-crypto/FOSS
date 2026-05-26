@@ -14,6 +14,7 @@ _OPTION_POOL_ENTRY_SIGNAL_COLUMNS = (
     ("entry_signal_summary", "TEXT"),
     ("entry_signal_generated_at", "TEXT"),
     ("entry_signal_payload", "TEXT"),
+    ("state_features", "TEXT"),
 )
 
 _POSITION_EXIT_SIGNAL_COLUMNS = (
@@ -121,6 +122,7 @@ def init_database(db_path: Path) -> None:
         _add_column_if_missing(con, "candidates", "quote_age_seconds", "INTEGER")
         _add_column_if_missing(con, "candidates", "greeks_source", "TEXT")
         _add_column_if_missing(con, "candidates", "iv_rank_source", "TEXT")
+        _add_column_if_missing(con, "candidates", "state_features", "TEXT")
         _add_option_pool_entry_signal_columns(con)
         _add_position_exit_signal_columns(con)
         con.commit()

@@ -54,6 +54,13 @@ def job_iv_history_tick() -> None:
     run_iv_history(Repo(options_db_path()), YFinanceProvider())
 
 
+def job_iv_snapshot_tick() -> None:
+    from app.data.provider_yfinance import YFinanceProvider
+    from app.jobs.job_iv_snapshot import run_iv_snapshot
+
+    run_iv_snapshot(Repo(options_db_path()), YFinanceProvider())
+
+
 def job_option_pool_maintenance_tick() -> None:
     from app.jobs.job_screener import run_option_pool_maintenance
 
@@ -105,12 +112,14 @@ def register_jobs(scheduler: BackgroundScheduler, repo: Repo) -> None:
     radar_min = int(schedule.get("radar_minutes", 15))
     settle_time = schedule.get("settlement_time_et", "16:30")
     iv_time = schedule.get("iv_refresh_time_et", "17:00")
+    iv_snapshot_time = schedule.get("iv_snapshot_time_et", "17:05")
 
     settle_h, settle_m = _parse_wall_clock_et(settle_time, "16:30")
     iv_h, iv_m = _parse_wall_clock_et(iv_time, "17:00")
+    iv_snap_h, iv_snap_m = _parse_wall_clock_et(iv_snapshot_time, "17:05")
 
     # Remove existing jobs to allow re-registration
-    for jid in ["screener", "radar", "settlement", "iv_history", "option_pool_maintenance"]:
+    for jid in ["screener", "radar", "settlement", "iv_history", "iv_snapshot", "option_pool_maintenance"]:
         try:
             scheduler.remove_job(jid)
         except Exception:
@@ -158,6 +167,18 @@ def register_jobs(scheduler: BackgroundScheduler, repo: Repo) -> None:
         misfire_grace_time=300,
     )
     scheduler.add_job(
+        job_iv_snapshot_tick,
+        CronTrigger(
+            day_of_week=_TRADING_DAYS,
+            hour=iv_snap_h,
+            minute=iv_snap_m,
+            timezone=_ET_TZ,
+        ),
+        id="iv_snapshot",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
         job_option_pool_maintenance_tick,
         CronTrigger(
             day_of_week=_TRADING_DAYS,
@@ -171,6 +192,6 @@ def register_jobs(scheduler: BackgroundScheduler, repo: Repo) -> None:
     )
     screener_log = f"{screener_min}m" if screener_min > 0 else "off"
     log.info(
-        "scheduler: jobs registered (screener=%s, radar=%dm, settle=%s, iv=%s)",
-        screener_log, radar_min, settle_time, iv_time,
+        "scheduler: jobs registered (screener=%s, radar=%dm, settle=%s, iv=%s, iv_snapshot=%s)",
+        screener_log, radar_min, settle_time, iv_time, iv_snapshot_time,
     )

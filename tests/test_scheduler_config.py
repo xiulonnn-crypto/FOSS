@@ -57,6 +57,16 @@ def test_register_jobs_accepts_legacy_integer_wall_clock_hours(scheduler_repo):
     assert "iv_history" in jobs
 
 
+def test_register_jobs_adds_iv_snapshot_after_iv_history(scheduler_repo):
+    repo, sched = scheduler_repo
+
+    register_jobs(sched, repo)
+
+    ids = {j.id for j in sched.get_jobs()}
+    assert "iv_history" in ids
+    assert "iv_snapshot" in ids
+
+
 def test_default_settings_have_scheduled_screener_disabled(scheduler_repo):
     repo, _sched = scheduler_repo
     assert repo.get_settings().get("schedule", {}).get("screener_minutes") == 0

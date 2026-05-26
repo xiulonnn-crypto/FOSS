@@ -265,6 +265,20 @@
                 </span>
               </th>
               <th class="px-3 py-2">开仓信号</th>
+              <th class="px-3 py-2">
+                <span class="inline-flex items-center justify-center gap-1 normal-case">
+                  <span>状态特征</span>
+                  <span class="relative inline-flex group/features-help">
+                    <button type="button" tabindex="0"
+                      class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-500 text-[10px] font-bold leading-none text-gray-400 hover:border-indigo-400 hover:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      aria-label="状态特征列说明">?</button>
+                    <span role="tooltip"
+                      class="pointer-events-none invisible absolute left-1/2 top-full z-[60] mt-1 w-max max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-gray-600 bg-gray-950 px-2 py-1.5 text-left text-[11px] font-normal leading-snug text-gray-100 opacity-0 shadow-xl transition-opacity duration-150 group-hover/features-help:visible group-hover/features-help:opacity-100 group-focus-within/features-help:visible group-focus-within/features-help:opacity-100">
+                      阶段一特征工程输出：Regime、VRP、RSI、布林带 Z-Score。IV30/Skew/VIX 需要本地 IV 快照逐步积累，冷启动时可能为空。
+                    </span>
+                  </span>
+                </span>
+              </th>
               <th class="px-3 py-2">到期日</th>
               <th class="px-3 py-2">行权价</th>
               <th class="px-3 py-2">Mid</th>

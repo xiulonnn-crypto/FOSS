@@ -32,6 +32,9 @@ class MarketDataProvider:
     def get_historical_close(self, symbol: str, day: date) -> Optional[float]:
         raise NotImplementedError
 
+    def get_historical_closes(self, symbol: str, days: int = 400) -> List[float]:
+        raise NotImplementedError
+
     def get_iv_history(self, symbol: str, days: int = 252) -> List[Tuple[date, float]]:
         raise NotImplementedError
 

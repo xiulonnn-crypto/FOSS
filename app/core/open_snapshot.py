@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.core.features import compute_state_features
 from app.core.technicals import compute_bb_lower_distance_pct, compute_rsi, compute_rsi_wilder
 from app.core.time_et import APP_TZ
 from app.db.repo import Repo
@@ -19,6 +20,7 @@ _CANDIDATE_FIELDS = (
     "delta",
     "theta",
     "vega",
+    "gamma",
     "spot",
     "dte",
     "annualized_roi",
@@ -112,6 +114,17 @@ def _merge_candidate_fields_from_request(snapshot: Dict[str, Any], req: Dict[str
                 parsed = None
             if isinstance(parsed, dict):
                 snapshot["entry_signal"] = parsed
+    if snapshot.get("state_features") is None and req.get("state_features") is not None:
+        val = req.get("state_features")
+        if isinstance(val, dict):
+            snapshot["state_features"] = val
+        elif isinstance(val, str):
+            try:
+                parsed = json.loads(val)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                snapshot["state_features"] = parsed
 
 
 def position_open_datetime(pos: Dict[str, Any]) -> Optional[datetime]:
@@ -246,6 +259,8 @@ def build_open_snapshot_dict(
                 for field in (*_CANDIDATE_FIELDS, *_QUALITY_FIELDS):
                     if cand.get(field) is not None:
                         snapshot[field] = cand[field]
+                if cand.get("state_features") is not None:
+                    snapshot["state_features"] = cand["state_features"]
         except Exception:
             pass
 
@@ -278,5 +293,22 @@ def build_open_snapshot_dict(
                 snapshot["rsi_24"] = rsi_24
             if bb_dist is not None:
                 snapshot["bb_distance_pct"] = bb_dist
+            if snapshot.get("state_features") is None:
+                latest_iv = None
+                latest_iv_row = None
+                try:
+                    latest_iv_row = repo.latest_market_iv_snapshot(symbol)
+                except Exception:
+                    latest_iv_row = None
+                if latest_iv_row:
+                    latest_iv = latest_iv_row.get("iv30")
+                snapshot["state_features"] = compute_state_features(
+                    closes,
+                    iv30=snapshot.get("iv") or latest_iv,
+                    skew=(latest_iv_row or {}).get("skew") if latest_iv_row else None,
+                    vix=(latest_iv_row or {}).get("vix") if latest_iv_row else None,
+                    rv_history=(repo.get_settings().get("rv_by_symbol") or {}).get(symbol),
+                    iv_history=(repo.get_settings().get("iv_by_symbol") or {}).get(symbol),
+                )
 
     return snapshot

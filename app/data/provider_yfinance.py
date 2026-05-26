@@ -156,6 +156,21 @@ class YFinanceProvider(MarketDataProvider):
             return None
         return float(df["Close"].iloc[-1])
 
+    def get_historical_closes(self, symbol: str, days: int = 400) -> List[float]:
+        ticker = yf.Ticker(symbol)
+        end = date.today() + timedelta(days=1)
+        start = date.today() - timedelta(days=days + 20)
+        df = ticker.history(start=str(start), end=str(end), auto_adjust=True)
+        if df.empty or "Close" not in df:
+            return []
+        closes = []
+        for value in df["Close"].dropna().tolist():
+            try:
+                closes.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return closes[-days:]
+
     def get_iv_history(self, symbol: str, days: int = 252) -> List[Tuple[date, float]]:
         """Return (date, log_return_std_annualised) as RV proxy for IV Rank."""
         ticker = yf.Ticker(symbol)
