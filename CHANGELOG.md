@@ -8,6 +8,7 @@
 
 ### Added
 
+- **复盘九维诊断回溯**：复盘页条件切片模块与订单诊断抽屉新增统一回溯逻辑——对手动录入或早期未跑过开仓信号/质量评级的历史订单，从 `open_snapshot` 现有字段（spot/strike/iv/dte/delta 等）即时反推 `margin_buffer`、IV Rank（RV proxy，使用 `settings.rv_by_symbol`）、数据质量评级（`infer_quality_from_candidate_snapshot`）与 `entry_signal_v1` 状态，使九维「未知」桶清零；批量「更新入场快照」与单笔「重算」会把回填结果持久化到 DB。
 - **订单诊断抽屉**：历史成交明细点击后，抽屉顶部优先展示该笔九维条件总结、亮点与暗点，并新增出场环境快照（平仓时间、价格、出场信号与平仓时市价）。
 - **复盘条件筛选**：复盘页可按时间区间、标的、来源池与最少样本筛选，汇总、切片与建议随之重算。
 - **表现体检**：复盘页展示最赚组合、最大浮亏组合、胜率高但收益偏低组合，并对样本不足结论给出警告。
@@ -49,3 +50,4 @@
 - **期权池首屏布局**：`#screener` 中观察池前移到首屏，标的池/观察名单默认折叠，避免进入页面后先看到大块标的管理区。
 - **历史候选质量显示**：旧扫描快照缺少质量字段时，API 会根据已保存的候选指标保守推断评级，并为仍无法评级的候选提供“未评级” tooltip 说明。
 - **持仓建议展示**：修复紧迫度同时出现浏览器原生 tooltip 与黑色自定义浮层的问题；「查看建议」弹层改为中文标签展示，并补充退出阈值场景与估算收益。
+- **观察卡 BLOCKED 状态陈旧**：`#screener` 观察卡在用户点击「查看决策卡」触发 `/api/pool/options/<id>/refresh` 后，会显示新鲜的 bid/ask/mid/spot/IV/安全垫，但 DTE、Score、Delta 仍为「-」且徽章固守 BLOCKED；现在 refresh 接口会对取回的合约调用 `fill_greeks`（补齐 Delta/Theta/Vega）+ `evaluate_contract_quality`（按当前 settings.filters 重评），并据此即时重算 `status`：若鲜活数据已脱离 C 级则把 BLOCKED 翻转为 ACTIVE，仍为 C 级则保留 BLOCKED 但 entry_signal 显示的是当前真实阻断原因（如 `dte_out_of_range`），不再循环引用过期的 `pool_blocked`/`quality_c`/`delta_missing`。

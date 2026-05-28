@@ -16,6 +16,8 @@ let _settings = {};
 let _lastScanRun = null;
 let _lastPoolRows = [];
 let _lastWatchRows = [];
+/** Row currently shown in the 决策卡 modal; used for stale-refresh detection. */
+let _entrySignalModalRow = null;
 /** Terminal watch rows stay in DB but are hidden from the screener watch grid. */
 const ACTIVE_WATCH_STATUSES = ['WATCHING', 'READY'];
 
@@ -45,6 +47,8 @@ function setScreenerScanLoading(on) {
 
 function showPage(page) {
   _currentPage = page;
+  if (page !== 'positions') stopPositionsAutoRefresh();
+  if (page !== 'screener') stopScreenerAutoRefresh();
   document.querySelectorAll('section[id^="page-"]').forEach(s => s.classList.add('hidden'));
   document.querySelectorAll('.nav-link').forEach(a => a.classList.remove('active'));
   const section = document.getElementById(`page-${page}`);
@@ -52,6 +56,8 @@ function showPage(page) {
   const link = document.querySelector(`.nav-link[data-page="${page}"]`);
   if (link) link.classList.add('active');
   loadPage(page);
+  if (page === 'positions') startPositionsAutoRefresh();
+  if (page === 'screener') startScreenerAutoRefresh();
 }
 
 async function loadPage(page) {
@@ -405,7 +411,11 @@ async function refreshPoolSections(scanRun = _lastScanRun, options = {}) {
   if (!skipCandidates) {
     _screenerCandidateSource = 'pool';
     _screenerCandidateRows = poolRows;
-    renderCandidates(poolRows, scanRun, { source: 'pool' });
+    try {
+      renderCandidates(poolRows, scanRun, { source: 'pool' });
+    } catch (e) {
+      console.error('[refreshPoolSections] renderCandidates threw:', e);
+    }
   }
   renderOptionWatches(watches);
 }
@@ -494,8 +504,18 @@ async function loadScreener() {
   _lastScanRun = run;
   _lastPoolRows = poolRows;
   renderUnderlyings(underlyings);
-  renderCandidates(poolRows, run, { source: 'pool' });
-  renderOptionWatches(watches);
+  try {
+    renderCandidates(poolRows, run, { source: 'pool' });
+  } catch (e) {
+    console.error('[loadScreener] renderCandidates threw:', e);
+  }
+  try {
+    renderOptionWatches(watches);
+  } catch (e) {
+    console.error('[loadScreener] renderOptionWatches threw:', e);
+    const grid = document.getElementById('option-watch-grid');
+    if (grid) grid.innerHTML = `<div class="rounded border border-red-700 bg-red-900/20 px-3 py-4 text-sm text-red-300 md:col-span-2 xl:col-span-3">观察池渲染出错：${escapeHtml(String(e))}，请打开控制台查看详情。</div>`;
+  }
   // Page refresh / reopen must not POST a new scan; only resume watching an already-started run.
   if (run && !run.finished_at && run.id != null) {
     void resumeUnfinishedScanPolling(run.id);
@@ -839,6 +859,7 @@ function watchDistanceText(option, watch) {
 
 function renderOptionWatches(rows) {
   _lastWatchRows = filterActiveWatchRows(rows);
+  console.debug('[renderOptionWatches] input rows=%d active=%d', (rows||[]).length, _lastWatchRows.length);
   const grid = document.getElementById('option-watch-grid');
   if (!grid) return;
   if (!_lastWatchRows.length) {
@@ -865,7 +886,7 @@ function renderOptionWatches(rows) {
         </div>
         <div class="mt-2 rounded border border-gray-700 bg-gray-950/30 px-2 py-1.5">
           <div class="flex flex-wrap items-center gap-2">${entrySignalBadgeHtml(option)}
-            <button onclick='openEntrySignalModal(${JSON.stringify(option)})' class="text-[11px] text-indigo-300 hover:text-indigo-200">查看决策卡</button>
+            <button onclick='openEntrySignalModal(${JSON.stringify({ ...option, option_pool_id: Number(watch.option_pool_id ?? option.id), watch_id: id })})' class="text-[11px] text-indigo-300 hover:text-indigo-200">查看决策卡</button>
           </div>
           ${getEntrySignal(option).summary ? `<div class="mt-1 break-words text-gray-400">${escapeHtml(getEntrySignal(option).summary)}</div>` : ''}
         </div>
@@ -966,8 +987,8 @@ function entrySignalTimingCardHtml(vol, timing) {
     </div>`);
   }
   rows.push(`<div class="flex justify-between gap-3">
-    <span class="text-gray-500">布林距离</span>
-    <span class="${bb != null && bb < 0 ? 'text-amber-300' : bb != null && bb <= 5 ? 'text-teal-300' : 'text-gray-200'} text-right">${bb != null ? bb.toFixed(1) + '%' : '-'}</span>
+    <span class="text-gray-500">距布林带下轨</span>
+    <span class="${bb != null && bb < 0 ? 'text-rose-400' : bb != null && bb <= 5 ? 'text-teal-300' : 'text-gray-200'} text-right">${bb != null ? bb.toFixed(1) + '%' : '-'}</span>
   </div>`);
 
   const hint = primaryRsi != null
@@ -1002,12 +1023,36 @@ function entrySignalReasonsHtml(signal) {
   `).join('');
 }
 
-function openEntrySignalModal(row) {
-  const signal = getEntrySignal(row);
-  const modal = document.getElementById('entry-signal-modal');
-  const title = document.getElementById('entry-signal-title');
+/** Render a loading skeleton while the 决策卡 refresh API call is in-flight. */
+function _renderEntrySignalLoading() {
   const body = document.getElementById('entry-signal-body');
-  if (!modal || !body) return;
+  if (!body) return;
+  body.innerHTML = `
+    <div class="flex items-center justify-center gap-3 py-10 text-sm text-gray-400">
+      <svg class="animate-spin h-5 w-5 shrink-0 text-indigo-400" xmlns="http://www.w3.org/2000/svg"
+           fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962
+             7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span>正在拉取最新行情…</span>
+    </div>
+  `;
+}
+
+/**
+ * Render the 决策卡 modal body for a given option row.
+ *
+ * @param {object} row  - Option pool / watch option row (with entry_signal).
+ * @param {object} opts
+ * @param {boolean} [opts.success] - True when data is freshly fetched; shows ✓ badge.
+ * @param {string}  [opts.error]   - Error message banner shown above the (cached) data.
+ */
+function _renderEntrySignalBody(row, { success = false, error = null } = {}) {
+  const body = document.getElementById('entry-signal-body');
+  if (!body) return;
+  const signal = getEntrySignal(row);
   const metrics = signal.metrics || {};
   const ret = metrics.return || {};
   const risk = metrics.risk || {};
@@ -1015,9 +1060,29 @@ function openEntrySignalModal(row) {
   const vol = metrics.volatility || {};
   const timing = metrics.timing || {};
   const dq = metrics.data_quality || {};
-  if (title) title.textContent = `${row.symbol || '-'} ${row.expiration || '-'} ${fmt(row.strike, 2)}P 开仓决策卡`;
+
+  const titleAttr = signal.generated_at ? ` title="${escapeAttr(signal.generated_at)}"` : '';
+  let quotedAtInner;
+  if (success && signal.generated_at) {
+    quotedAtInner = `<span class="text-emerald-400">✓ 已刷新</span> · 数据时点：${escapeHtml(formatQuotedAt(signal.generated_at))}`;
+  } else if (success) {
+    quotedAtInner = `<span class="text-emerald-400">✓ 已刷新</span>`;
+  } else if (signal.generated_at) {
+    quotedAtInner = `数据时点：${escapeHtml(formatQuotedAt(signal.generated_at))}`;
+  } else {
+    quotedAtInner = '';
+  }
+
+  const errorBanner = error
+    ? `<div class="rounded border border-amber-600/40 bg-amber-900/20 px-3 py-2 text-[11px] text-amber-300">
+         ⚠ 行情刷新失败（${escapeHtml(error)}），以下为缓存数据
+       </div>`
+    : '';
+
   body.innerHTML = `
+    ${errorBanner}
     <div class="flex flex-wrap items-center gap-2">${entrySignalBadgeHtml(row)}<span class="break-words text-gray-300">${escapeHtml(signal.summary || '暂无信号摘要')}</span></div>
+    <div class="js-entry-signal-quoted-at text-[11px] text-gray-500"${titleAttr}>${quotedAtInner}</div>
     <div class="grid gap-3 sm:grid-cols-2">
       ${entrySignalMetricCardHtml('收益', [
         ['Premium', fmt(ret.premium ?? row.mid, 2)],
@@ -1026,7 +1091,8 @@ function openEntrySignalModal(row) {
         ['占用资金/张', ret.capital_usage != null ? '$' + fmt(ret.capital_usage, 0) : '-'],
       ])}
       ${entrySignalMetricCardHtml('风险', [
-        ['现价 / 行权价', `${fmt(risk.spot ?? row.spot, 2)} / ${fmt(risk.strike ?? row.strike, 2)}`],
+        ['入场标的价', (risk.spot ?? row.spot) != null ? `$${fmt(risk.spot ?? row.spot, 2)}` : '-'],
+        ['行权价', (risk.strike ?? row.strike) != null ? `$${fmt(risk.strike ?? row.strike, 2)}` : '-'],
         ['安全垫', risk.margin_buffer != null ? (risk.margin_buffer * 100).toFixed(1) + '%' : '-'],
         ['Delta', fmt(risk.delta ?? row.delta, 3)],
         ['DTE', String(risk.dte ?? row.dte ?? '-')],
@@ -1049,14 +1115,105 @@ function openEntrySignalModal(row) {
       <div class="space-y-2">${entrySignalReasonsHtml(signal)}</div>
     </div>
   `;
+}
+
+/**
+ * Open the 决策卡 modal for `row`.
+ *
+ * Flow: loading skeleton → GET /api/pool/options/<id>/refresh →
+ *   success: render fresh data with ✓ badge
+ *   failure: render cached data with ⚠ error banner
+ *
+ * The modal body is ONLY populated after the API result arrives so the user
+ * always sees a definitive outcome (success / failure), never silent stale data.
+ * If the user closes the modal or opens a different option before the response
+ * arrives, the update is silently discarded.
+ */
+async function openEntrySignalModal(row) {
+  const modal = document.getElementById('entry-signal-modal');
+  const title = document.getElementById('entry-signal-title');
+  if (!modal) return;
+
+  _entrySignalModalRow = row;
+  if (title) title.textContent = `${row.symbol || '-'} ${row.expiration || '-'} ${fmt(row.strike, 2)}P 开仓决策卡`;
+
+  const poolId = row.option_pool_id != null ? Number(row.option_pool_id) : null;
+  if (!poolId) {
+    // No pool id — show cached data directly (nothing to refresh).
+    _renderEntrySignalBody(row);
+    modal.classList.remove('hidden');
+    return;
+  }
+
+  // Show loading skeleton; data will appear only after the fetch completes.
+  _renderEntrySignalLoading();
   modal.classList.remove('hidden');
+
+  try {
+    const params = new URLSearchParams();
+    if (row.watch_id != null) params.set('watch_id', String(Number(row.watch_id)));
+    const qs = params.toString();
+    const data = await apiFetch(`/api/pool/options/${poolId}/refresh${qs ? `?${qs}` : ''}`);
+
+    // Stale-check: discard if modal was closed or user opened a different option.
+    if (modal.classList.contains('hidden') || _entrySignalModalRow !== row) return;
+
+    const opt = data && data.option;
+    const freshRow = opt ? {
+      ...opt,
+      option_pool_id: poolId,
+      ...(row.watch_id != null ? { watch_id: Number(row.watch_id) } : {}),
+    } : null;
+    if (freshRow) {
+      _renderEntrySignalBody(freshRow, { success: true });   // ✓ 已刷新
+      updateGlobalQuoteLabel(data.quoted_at);
+      _patchCachedOptionRow(freshRow);
+      // Re-render screener grids immediately so the user sees fresh data without a full page reload.
+      renderOptionWatches(_lastWatchRows);
+      if (_screenerCandidateSource === 'pool') {
+        renderCandidates(_screenerCandidateRows, _lastScanRun, { source: 'pool' });
+      }
+    } else {
+      // API succeeded but returned no option row — fall back to cached data.
+      _renderEntrySignalBody(row, { error: '返回数据异常' });
+    }
+  } catch (e) {
+    console.warn('决策卡行情刷新失败', e);
+    if (!modal.classList.contains('hidden') && _entrySignalModalRow === row) {
+      const msg = e && e.message ? String(e.message).slice(0, 60) : '网络错误';
+      _renderEntrySignalBody(row, { error: msg });           // ⚠ 刷新失败 + 缓存数据
+    }
+  }
 }
 
 function closeEntrySignalModal() {
+  _entrySignalModalRow = null;
   document.getElementById('entry-signal-modal')?.classList.add('hidden');
 }
 
 document.getElementById('entry-signal-close')?.addEventListener('click', closeEntrySignalModal);
+
+/**
+ * Patch a freshly-fetched option row into all in-memory caches
+ * (_lastPoolRows, _screenerCandidateRows, _lastWatchRows) so the screener
+ * grids stay consistent with the data shown in the 决策卡 after a refresh.
+ */
+function _patchCachedOptionRow(freshRow) {
+  const poolId = freshRow.option_pool_id != null ? Number(freshRow.option_pool_id) : null;
+  if (!poolId) return;
+  const patch = (rows) => rows.map(r =>
+    Number(r.option_pool_id) === poolId ? { ...r, ...freshRow } : r
+  );
+  _lastPoolRows = patch(_lastPoolRows);
+  if (_screenerCandidateSource === 'pool') {
+    _screenerCandidateRows = patch(_screenerCandidateRows);
+  }
+  _lastWatchRows = _lastWatchRows.map(w => {
+    const opt = w.option || {};
+    const optPoolId = opt.option_pool_id != null ? Number(opt.option_pool_id) : (opt.id != null ? Number(opt.id) : null);
+    return optPoolId === poolId ? { ...w, option: { ...opt, ...freshRow } } : w;
+  });
+}
 
 async function watchOptionPool(optionPoolId) {
   const watch = await apiFetch('/api/watch/options', {
@@ -1306,6 +1463,27 @@ document.getElementById('btn-refresh-option-watch')?.addEventListener('click', a
   });
 });
 
+document.getElementById('btn-reset-pool-filters')?.addEventListener('click', async () => {
+  const statusEl = document.getElementById('option-pool-status-filter');
+  const qualityEl = document.getElementById('option-pool-quality-filter');
+  const entrySignalEl = document.getElementById('option-pool-entry-signal-filter');
+  const minScoreEl = document.getElementById('option-pool-min-score');
+  const minDteEl = document.getElementById('option-pool-min-dte');
+  const maxDteEl = document.getElementById('option-pool-max-dte');
+  if (statusEl) statusEl.value = 'NEW,ACTIVE';
+  if (qualityEl) qualityEl.value = '';
+  if (entrySignalEl) entrySignalEl.value = 'OPENABLE';
+  if (minScoreEl) minScoreEl.value = '0.7';
+  if (minDteEl) minDteEl.value = '';
+  if (maxDteEl) maxDteEl.value = '';
+  setScreenerScanLoading(true);
+  try {
+    await refreshPoolSections();
+  } finally {
+    setScreenerScanLoading(false);
+  }
+});
+
 // ================================================================
 // Entry Modal
 // ================================================================
@@ -1459,6 +1637,113 @@ function scheduleLoadPositions() {
     _positionsRefreshTimer = null;
     void loadPositions();
   }, 400);
+}
+
+let _positionsAutoRefreshInterval = null;
+/** Start a 60-second periodic market-data refresh while on the positions page. */
+function startPositionsAutoRefresh() {
+  stopPositionsAutoRefresh();
+  _positionsAutoRefreshInterval = setInterval(() => {
+    if (_currentPage !== 'positions') { stopPositionsAutoRefresh(); return; }
+    void loadPositions();
+  }, 60_000);
+}
+function stopPositionsAutoRefresh() {
+  if (_positionsAutoRefreshInterval !== null) {
+    clearInterval(_positionsAutoRefreshInterval);
+    _positionsAutoRefreshInterval = null;
+  }
+}
+
+// ================================================================
+// #screener — periodic underlying market-data refresh (mirrors #positions)
+// ================================================================
+let _screenerAutoRefreshInterval = null;
+let _screenerMarksInFlight = false;
+
+/**
+ * Per-minute auto-refresh while on #screener.
+ *
+ * Hits `/api/screener/marks` to pull fresh underlying spot for the
+ * symbols referenced by the underlying pool, option pool, and option watch
+ * grid; overlays them on the in-memory rows; rebuilds entry_signal so the
+ * 决策卡 (opened from the candidates table or the watch grid) shows the
+ * latest market data. Mirrors `startPositionsAutoRefresh()` semantics.
+ */
+let _screenerInitialMarksTimer = null;
+/** Delay for the first marks fetch after entering #screener.
+ *  Short enough that the 行情时间 label appears within a second or two of
+ *  landing on the page; long enough that we don't race the initial
+ *  `loadScreener()` Promise.all that already runs on entry. */
+const SCREENER_INITIAL_MARKS_DELAY_MS = 1500;
+
+function startScreenerAutoRefresh() {
+  stopScreenerAutoRefresh();
+  _screenerAutoRefreshInterval = setInterval(() => {
+    if (_currentPage !== 'screener') { stopScreenerAutoRefresh(); return; }
+    void refreshScreenerMarks();
+  }, 60_000);
+  // Fire a one-shot refresh shortly after entering the page so the 行情时间
+  // label populates without waiting a full minute for the first tick.
+  if (_screenerInitialMarksTimer !== null) clearTimeout(_screenerInitialMarksTimer);
+  _screenerInitialMarksTimer = setTimeout(() => {
+    _screenerInitialMarksTimer = null;
+    if (_currentPage === 'screener') void refreshScreenerMarks();
+  }, SCREENER_INITIAL_MARKS_DELAY_MS);
+}
+function stopScreenerAutoRefresh() {
+  if (_screenerAutoRefreshInterval !== null) {
+    clearInterval(_screenerAutoRefreshInterval);
+    _screenerAutoRefreshInterval = null;
+  }
+  if (_screenerInitialMarksTimer !== null) {
+    clearTimeout(_screenerInitialMarksTimer);
+    _screenerInitialMarksTimer = null;
+  }
+}
+
+async function refreshScreenerMarks(options = {}) {
+  // `force: true` lets the manual 「刷新行情」 button bypass the in-flight guard
+  // (otherwise a slow background tick would silently swallow the click).
+  const force = !!options.force;
+  if (_screenerMarksInFlight && !force) return null;
+  _screenerMarksInFlight = true;
+  try {
+    const params = new URLSearchParams();
+    // Preserve any active option-pool filter so the refreshed table matches
+    // the user's current view.
+    const optionQs = optionPoolFilterQuery().replace(/^\?/, '');
+    if (optionQs) optionQs.split('&').forEach(kv => {
+      const [k, v] = kv.split('=');
+      if (k) params.set(decodeURIComponent(k), v ? decodeURIComponent(v) : '');
+    });
+    params.set('watch_status', ACTIVE_WATCH_STATUSES.join(','));
+    const qs = params.toString();
+    const data = await apiFetch(`/api/screener/marks${qs ? `?${qs}` : ''}`);
+    // Surface the refresh time in the top-bar 行情时间 label right away so the
+    // user sees a 「刷新行情」 button right-side timestamp even if the page
+    // navigation race below short-circuits the grid rerender.
+    updateGlobalQuoteLabel(data && data.quoted_at);
+    if (_currentPage !== 'screener') return data;
+    const underlyings = normalizeUnderlyingsResponse(data);
+    const optionRows = normalizePoolOptionsResponse(data);
+    const watches = filterActiveWatchRows(normalizeOptionWatchesResponse(data));
+    _lastPoolRows = optionRows;
+    if (_screenerCandidateSource === 'pool') {
+      _screenerCandidateRows = optionRows;
+      renderCandidates(optionRows, _lastScanRun, { source: 'pool' });
+    }
+    renderUnderlyings(underlyings);
+    renderOptionWatches(watches);
+    return data;
+  } catch (e) {
+    if (_currentPage === 'screener') {
+      console.warn('screener marks refresh failed', e);
+    }
+    throw e;
+  } finally {
+    _screenerMarksInFlight = false;
+  }
 }
 
 // ================================================================
@@ -1970,7 +2255,7 @@ function renderExitSignalStrip(p) {
       </div>
       <div class="text-xs text-gray-300 break-words">${escapeHtml(signal.summary || '未形成建议说明')}</div>
       <div class="grid grid-cols-2 gap-1 text-[11px] text-gray-400">
-        <div>浮盈 <span class="text-gray-200">${fmtMaybePct(metrics.pnl_pct)}</span></div>
+        <div>浮盈 <span class="${metrics.pnl_pct == null ? 'text-gray-200' : Number(metrics.pnl_pct) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${fmtMaybePct(metrics.pnl_pct)}</span></div>
         <div>DTE <span class="text-gray-200">${metrics.dte ?? '—'}</span></div>
         <div>Delta <span class="text-gray-200">${metrics.delta != null ? fmt(metrics.delta, 2) : '—'}</span></div>
         <div>安全垫 <span class="text-gray-200">${fmtMaybePct(metrics.margin_buffer)}</span></div>
@@ -2103,7 +2388,11 @@ function renderPositionCard(p) {
     else if (m.mark_pending) basisTxt = '（待刷新）';
   }
   const pnlPctTxt = (m.quote_error || m.pnl_pct == null) ? '—' : (m.pnl_pct * 100).toFixed(1) + '%';
-  const pnlUsdTxt = (m.quote_error || m.unrealized_pnl_usd == null) ? '—' : ('$' + fmt(m.unrealized_pnl_usd, 2));
+  const pnlPctNum = (m.quote_error || m.pnl_pct == null) ? null : Number(m.pnl_pct);
+  const pnlPctCls = pnlPctNum == null ? 'text-white' : pnlPctNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const pnlUsdNum = (m.quote_error || m.unrealized_pnl_usd == null) ? null : Number(m.unrealized_pnl_usd);
+  const pnlUsdTxt = pnlUsdNum == null ? '—' : ('$' + fmt(m.unrealized_pnl_usd, 2));
+  const pnlUsdCls = pnlUsdNum == null ? 'text-gray-400' : pnlUsdNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
   let errHtml = '';
   if (m.quote_error) {
     errHtml =
@@ -2121,7 +2410,7 @@ function renderPositionCard(p) {
         <div class="text-xs text-gray-400 space-y-0.5">
           <div>股票现价 <span class="text-white">${spotTxt}</span></div>
           <div>期权估价<span class="text-gray-500">${basisTxt}</span> <span class="text-white">${midTxt}</span></div>
-          <div>浮盈比例 <span class="text-white">${pnlPctTxt}</span> · 未实现盈亏 <span class="text-emerald-300">${pnlUsdTxt}</span></div>
+          <div>浮盈比例 <span class="${pnlPctCls}">${pnlPctTxt}</span> · 未实现盈亏 <span class="${pnlUsdCls}">${pnlUsdTxt}</span></div>
           <div>行权价 <span class="text-white">${p.strike}</span> | 到期 <span class="text-white">${escapeHtml(String(p.expiration ?? ''))}</span></div>
           <div>开仓价 <span class="text-white">${fmt(p.open_premium, 2)}</span> × ${p.contracts} 张</div>
           <div>开仓时间 ${p.open_at ? formatEtDatetime(p.open_at) : '-'}</div>
@@ -2398,7 +2687,13 @@ document.getElementById('btn-refresh-quotes').addEventListener('click', async ()
   btn.setAttribute('aria-busy', 'true');
   btn.textContent = '刷新中…';
   try {
-    if (_currentPage === 'positions') {
+    if (_currentPage === 'screener') {
+      // 顶栏按钮在 #screener 必须刷新 #screener 自己的数据源（合约池/观察池
+      // /标的池 + 重建 entry_signal），而不是顺手去拉持仓 marks。
+      const data = await refreshScreenerMarks({ force: true });
+      const t = data && data.quoted_at ? formatQuotedAt(data.quoted_at) : '';
+      toast(t ? `行情刷新成功（${t}）` : '行情刷新成功', 'info');
+    } else if (_currentPage === 'positions') {
       const ok = await loadPositions();
       if (ok) toast('行情刷新成功', 'info');
     } else {
@@ -2533,10 +2828,10 @@ function renderReviewConditionSlices(slices) {
         <td class="py-1.5 pr-2 text-left text-gray-200 break-words">${escapeHtml(bucket.label || bucket.bucket || '-')}${bucket.low_sample ? ' <span class="text-amber-400">少样本</span>' : ''}</td>
         <td class="py-1.5 text-right text-gray-300">${bucket.count ?? 0}</td>
         <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.win_rate, 0)}</td>
-        <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.avg_roe, 1, true)}</td>
+        <td class="py-1.5 text-right ${bucket.avg_roe == null ? 'text-gray-300' : Number(bucket.avg_roe) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${reviewPct(bucket.avg_roe, 1, true)}</td>
         <td class="py-1.5 text-right text-gray-300">${bucket.avg_holding_days != null ? Number(bucket.avg_holding_days).toFixed(1) + 'd' : '-'}</td>
-        <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.avg_maee, 1, true)}</td>
-        <td class="py-1.5 text-right text-gray-300">${reviewPct(bucket.avg_mfe, 1, true)}</td>
+        <td class="py-1.5 text-right ${bucket.avg_maee == null ? 'text-gray-300' : Number(bucket.avg_maee) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${reviewPct(bucket.avg_maee, 1, true)}</td>
+        <td class="py-1.5 text-right ${bucket.avg_mfe == null ? 'text-gray-300' : Number(bucket.avg_mfe) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${reviewPct(bucket.avg_mfe, 1, true)}</td>
       </tr>
     `).join('') || '<tr><td colspan="7" class="py-3 text-center text-xs text-gray-500">暂无数据</td></tr>';
     return `

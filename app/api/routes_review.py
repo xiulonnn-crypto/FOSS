@@ -23,6 +23,7 @@ from app.core.review_analytics import (
     position_holding_days,
     position_roe,
 )
+from app.core.review_backfill import backfill_diagnostic_fields
 from app.core.review_highlights import build_position_highlights
 from app.core.review_suggestions import (
     apply_suggestion_changes,
@@ -86,7 +87,11 @@ def _merge_open_snapshot_refresh(repo: Repo, position_id: int, pos: Dict[str, An
     for k, v in built.items():
         if v is not None:
             out[k] = v
-    return out
+    try:
+        settings = repo.get_settings()
+    except Exception:
+        settings = {}
+    return backfill_diagnostic_fields(repo, pos, out, settings)
 
 
 def _sorted_closed_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -617,6 +622,13 @@ def _compute_summary(
         })
 
     snapshots = _load_open_snapshots(repo, position_ids) if repo else {}
+    if repo is not None:
+        pos_by_id = {int(p["id"]): p for p in positions if p.get("id") is not None}
+        for pid, snap in list(snapshots.items()):
+            pos = pos_by_id.get(int(pid))
+            if pos is None:
+                continue
+            snapshots[pid] = backfill_diagnostic_fields(repo, pos, snap, settings)
     excursions = _load_excursions(repo, position_ids)
     records = build_review_records(positions, snapshots, excursions)
     slices_dict, condition_slices = build_condition_slices(records, min_sample)
@@ -1048,8 +1060,14 @@ def position_diagnosis(position_id: int):
     if not isinstance(open_snapshot, dict):
         open_snapshot = {}
 
-    dimension_summary = build_position_dimension_summary(pos, open_snapshot)
-    hl = build_position_highlights(pos, open_snapshot)
+    try:
+        settings = repo.get_settings()
+    except Exception:
+        settings = {}
+    snapshot_for_diag = backfill_diagnostic_fields(repo, pos, open_snapshot, settings)
+
+    dimension_summary = build_position_dimension_summary(pos, snapshot_for_diag)
+    hl = build_position_highlights(pos, snapshot_for_diag)
     return jsonify({
         "position_id": position_id,
         "dimension_summary": dimension_summary,

@@ -349,3 +349,58 @@ def test_put_delta_negative():
 2. **Inline Execution** — 本会话用 `executing-plans` 批量执行并设检查点  
 
 **Which approach?**（由你或下一会话的执行者选择。）
+
+---
+
+## Post-Plan 追加功能记录
+
+### 决策卡（决策卡）点击刷新 *(2026-05-29 完成)*
+
+**需求：** 点击 screener 候选表格或观察池的「决策卡」按钮时，单独拉取最新期权行情（含 Premium + Greeks），局部更新 modal。
+
+**实现：**
+
+| 变更 | 路径 | 说明 |
+|------|------|------|
+| 新 API 端点 | `app/api/routes_pool.py` | `GET /api/pool/options/<id>/refresh[?watch_id=X]`：调用 `get_quote` + `get_option_chain` → `derive_csp_candidate_row` → 重建 `entry_signal`，返回 `{ schema, quoted_at, option, chain_refreshed }` |
+| 前端 loading 骨架 | `frontend/js/app.js` | 新增 `_renderEntrySignalLoading()` — spinner + 「正在拉取最新行情…」 |
+| 前端 modal 渲染 | `frontend/js/app.js` | `openEntrySignalModal` 改为 async；流程：loading → fetch → 成功显示 `✓ 已刷新 · 数据时点` / 失败显示 `⚠ 行情刷新失败 + 缓存数据` |
+| 缓存同步 | `frontend/js/app.js` | `_patchCachedOptionRow(freshRow)` 将刷新数据写回 `_lastPoolRows` / `_screenerCandidateRows` / `_lastWatchRows` |
+| watch 网格 | `frontend/js/app.js` | 「查看决策卡」按钮补传 `watch_id`，使 entry_signal 重建时携带 watch 上下文 |
+
+**UX 模型选择：**「结果明确（loading-first）」—— modal 始终只在拿到 API 结果后才展示数据，避免用户混淆缓存数据与实时数据。iv_rank 历史数据（252 天）不在点击时重拉（成本过高，YAGNI）。
+
+**测试：** 325 passed，0 failed（含 `test_screener_marks_api.py`、`test_frontend_pool_layout.py`、`test_entry_signal_core.py`）。
+
+**经验教训（已更新 brainstorming 技能）：** 涉及「点击打开含网络请求的 modal」的设计，必须在 brainstorming 阶段明确问：「等待期间展示缓存数据还是 Loading 状态？」否则实现者会默认 optimistic，用户接受后发现不符合预期，导致二次迭代。
+
+### 决策卡刷新 Bug Fix — 观察池路径缺 option_pool_id *(2026-05-29)*
+
+**症状：** 观察池点击「查看决策卡」不触发刷新，始终展示缓存数据。
+
+**根因：** `_option_watch_from_row`（repo.py:137）在剥离 `option_*` 前缀时显式排除 `option_pool_id`（保留在 watch 顶层）。`renderOptionWatches` 构造 `openEntrySignalModal` 调用时只传 `{ ...option, watch_id: id }`，`watch.option` 内无 `option_pool_id`，modal 走缓存路径。
+
+**修复：** `app.js line 889`，补填 `option_pool_id: Number(watch.option_pool_id ?? option.id)`（一行）。
+
+**教训 — 多入口函数的完整性审计：** 实现「决策卡刷新」时只测试了合约池入口，未覆盖观察池入口。规则：当一个关键函数（如 `openEntrySignalModal`）被 N 个入口调用时，每个入口必须有独立测试验证关键字段（`option_pool_id`）的传递。COUNT 入口数 → 每个入口一个 test。
+
+### 决策卡刷新 Bug Fix — 内存更新后未重渲染 screener 页面 *(2026-05-29)*
+
+**症状：** 决策卡刷新成功后，#screener 合约池表格和观察池卡片仍显示旧的 Premium/Greeks 数据，需手动点「刷新行情」才能看到新值。
+
+**根因：** `_patchCachedOptionRow(freshRow)` 只更新内存数组（`_lastPoolRows`、`_screenerCandidateRows`、`_lastWatchRows`），调用后 **未触发任何 DOM 重渲染**。对比 `refreshScreenerMarks` 在更新内存后立即调用了 `renderCandidates` 和 `renderOptionWatches`，`openEntrySignalModal` 的成功路径漏掉了这两个调用。
+
+**修复：** `frontend/js/app.js`，在 `_patchCachedOptionRow(freshRow)` 调用后追加（3 行）：
+```javascript
+renderOptionWatches(_lastWatchRows);
+if (_screenerCandidateSource === 'pool') {
+  renderCandidates(_screenerCandidateRows, _lastScanRun, { source: 'pool' });
+}
+```
+
+**测试：** 新增 `test_modal_refresh_rerenders_screener_grids_after_patch`（RED → GREEN）；20 个前端 + 核心测试全通过。
+
+**教训 — 内存-DOM 失步规则（Memory-DOM sync gap）：** 每当调用名为 "patch/update/sync/write" 的内存更新函数之后，必须明确问：**「谁负责把这份内存变化映射回 DOM？」**
+- 若答案是「调用方自己」：必须在调用后显式写 re-render 调用；
+- 若答案是「这个函数内部」：函数名应包含 "render/refresh/flush"，并在 docstring 中标注。
+若未明确回答这个问题，DOM 与内存将悄无声息地失步，无任何报错，只有用户发现数据是旧的。

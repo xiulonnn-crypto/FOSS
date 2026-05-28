@@ -196,6 +196,11 @@ def recalculate_closed_position_insights(
     prev_snap = repo.get_open_snapshot(position_id) or {}
     tech = build_open_snapshot_dict(repo, pos, None)
     merged = _merge_snapshot_layers(prev_snap, tech, entry_block)
+    try:
+        from app.core.review_backfill import backfill_diagnostic_fields
+        merged = backfill_diagnostic_fields(repo, pos, merged, repo.get_settings() or {})
+    except Exception as exc:
+        _LOG.warning("entry_recalc: backfill failed (non-fatal) position_id=%s: %s", position_id, exc)
     repo.save_open_snapshot(position_id, merged)
 
     close_d = close_dt.astimezone(APP_TZ).date()

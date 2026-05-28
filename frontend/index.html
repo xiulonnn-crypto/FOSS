@@ -218,14 +218,14 @@
           <label class="text-xs text-gray-400">开仓信号
             <select id="option-pool-entry-signal-filter" class="mt-1 block bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100">
               <option value="">全部</option>
-              <option value="OPENABLE">可开仓</option>
+              <option value="OPENABLE" selected>可开仓</option>
               <option value="WAIT">等待</option>
               <option value="REJECT">拒绝</option>
               <option value="UNKNOWN">未知</option>
             </select>
           </label>
           <label class="text-xs text-gray-400">最低评分
-            <input id="option-pool-min-score" type="number" step="0.01" min="0" max="1"
+            <input id="option-pool-min-score" type="number" step="0.01" min="0" max="1" value="0.7"
               class="mt-1 block w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100" />
           </label>
           <label class="text-xs text-gray-400">DTE
@@ -238,6 +238,8 @@
           </label>
           <button type="button" id="btn-refresh-option-pool"
             class="bg-gray-700 hover:bg-gray-600 text-gray-100 px-3 py-2 rounded border border-gray-600 text-sm">刷新合约池</button>
+          <button type="button" id="btn-reset-pool-filters"
+            class="bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-gray-100 px-3 py-2 rounded border border-gray-600 text-sm">重置</button>
         </div>
       </div>
       <!-- Option pool table -->

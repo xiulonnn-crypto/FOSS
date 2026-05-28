@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 
 ENTRY_SIGNAL_SCHEMA = "entry_signal_v1"
+
+# `state_features` (features.py StateFeatures) → flat row keys consumed by
+# ``_metrics`` / ``_add_timing_reasons``.  ``bb_lower_distance_pct`` is renamed
+# to ``bb_distance_pct`` so the screener decision card and the #review entry
+# environment snapshot share one canonical field name.
+_STATE_FEATURE_ALIASES: Tuple[Tuple[str, str], ...] = (
+    ("rsi_14", "rsi_14"),
+    ("rsi_6", "rsi_6"),
+    ("rsi_12", "rsi_12"),
+    ("rsi_24", "rsi_24"),
+    ("bb_lower_distance_pct", "bb_distance_pct"),
+)
 ENTRY_SIGNAL_STATUSES = frozenset({"OPENABLE", "WAIT", "REJECT", "EXPIRED", "UNKNOWN"})
 
 _BLOCKED_POOL_STATUSES = {"BLOCKED"}
@@ -26,6 +39,7 @@ def build_entry_signal(
     settings = settings or {}
     filters = settings.get("filters") or {}
     row = {**(candidate_row or {}), **(pool_row or {})}
+    _hoist_state_features(row)
     now_dt = now or datetime.now(timezone.utc)
     today_d = today or date.today()
 
@@ -388,6 +402,30 @@ def _metrics(row: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             "iv_rank_source": row.get("iv_rank_source"),
         },
     }
+
+
+def _hoist_state_features(row: Dict[str, Any]) -> None:
+    """Promote timing keys from ``state_features`` into top-level row fields.
+
+    ``state_features`` may arrive as a dict (job_screener / get_option_pool) or
+    a JSON string (raw repo reads).  Explicit row-level values always win, so
+    callers that already set ``rsi_14`` / ``bb_distance_pct`` see no change.
+    """
+    raw = row.get("state_features")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = None
+    if not isinstance(raw, dict):
+        return
+    for src, dst in _STATE_FEATURE_ALIASES:
+        if row.get(dst) is not None:
+            continue
+        value = raw.get(src)
+        if value is None or value == "":
+            continue
+        row[dst] = value
 
 
 def _quality_grade(value: Any) -> str:

@@ -90,3 +90,61 @@ def test_entry_signal_can_gate_watch_readiness():
 
     assert signal["status"] == "WATCHING"
     assert signal["reason"] == "entry_signal_wait"
+
+
+def test_entry_signal_promotes_state_features_into_timing_metrics():
+    """Pool rows store rsi_14 / bb_lower_distance_pct inside state_features JSON.
+
+    The decision card on #screener reads ``metrics.timing.rsi_14`` /
+    ``metrics.timing.bb_distance_pct`` (same shape as ``#review`` 入场环境快照),
+    so the builder must promote those fields to the top-level row before
+    ``_metrics`` is materialized.
+    """
+    pool = _pool_row(
+        state_features={
+            "rsi_14": 28.5,
+            "bb_lower_distance_pct": -1.2,
+            "regime": "neutral",
+        }
+    )
+
+    signal = build_entry_signal(pool, today=date.today())
+
+    timing = signal["metrics"]["timing"]
+    assert timing["rsi_14"] == 28.5
+    assert timing["bb_distance_pct"] == -1.2
+
+    # Timing reasons (oversold / below-band) should also fire from state_features.
+    codes = {r["code"] for r in signal["reasons"]}
+    assert "timing_oversold" in codes
+    assert "timing_below_lower_band" in codes
+
+
+def test_entry_signal_state_features_does_not_override_explicit_top_level():
+    """When a candidate already carries flat rsi_14, prefer it over state_features."""
+    pool = _pool_row(
+        rsi_14=55.0,
+        bb_distance_pct=2.0,
+        state_features={"rsi_14": 28.5, "bb_lower_distance_pct": -1.2},
+    )
+
+    signal = build_entry_signal(pool, today=date.today())
+
+    timing = signal["metrics"]["timing"]
+    assert timing["rsi_14"] == 55.0
+    assert timing["bb_distance_pct"] == 2.0
+
+
+def test_entry_signal_accepts_state_features_json_string():
+    """``option_pool.state_features`` is sometimes a JSON string (e.g. legacy reads)."""
+    import json as _json
+
+    pool = _pool_row(
+        state_features=_json.dumps({"rsi_14": 33.0, "bb_lower_distance_pct": 4.5})
+    )
+
+    signal = build_entry_signal(pool, today=date.today())
+
+    timing = signal["metrics"]["timing"]
+    assert timing["rsi_14"] == 33.0
+    assert timing["bb_distance_pct"] == 4.5
