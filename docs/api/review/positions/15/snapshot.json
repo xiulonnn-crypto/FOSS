@@ -1,0 +1,264 @@
+{
+  "candidate_data": null,
+  "close_snapshot": {
+    "close_notes": null,
+    "close_premium": 7.85,
+    "closed_at": "2026-06-03T19:05:00+00:00",
+    "exit_signal": null,
+    "exit_signal_id": null,
+    "mark": {
+      "current_mid": 7.85,
+      "delta": -0.1145,
+      "iv": 0.926003,
+      "margin_buffer": 0.280822,
+      "mark_basis": "bs_daily_close_constant_iv_replay",
+      "option_mid": 7.85,
+      "pnl_pct": 0.182292,
+      "spot": 305.904999
+    },
+    "realized_pnl": 692.0,
+    "replay_model": "bs_daily_close_constant_iv",
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "take_profit_fast"
+  },
+  "open_snapshot": {
+    "annualized_roi": 0.353939,
+    "bb_distance_pct": 52.52,
+    "delta": -0.16685892,
+    "dte": 45,
+    "entry_signal": {
+      "blockers": [],
+      "decision_score": 68,
+      "expiration": "2026-07-17",
+      "generated_at": "2026-06-04T08:15:37.079382+00:00",
+      "metrics": {
+        "data_quality": {
+          "greeks_source": "provider",
+          "iv_rank_source": "rv_proxy",
+          "quality_flags": [
+            "provider_delayed",
+            "iv_rank_proxy",
+            "volume_missing",
+            "snapshot_inferred"
+          ],
+          "quality_grade": "B",
+          "quality_score": 95,
+          "quote_age_seconds": null
+        },
+        "liquidity": {
+          "ask": 9.6,
+          "bid": 9.6,
+          "mid": 9.6,
+          "open_interest": 50,
+          "spread_pct": 0.0,
+          "volume": null
+        },
+        "return": {
+          "annualized_roi": 0.353939,
+          "capital_usage": 22000.0,
+          "max_profit": 960.0,
+          "premium": 9.6,
+          "score": null
+        },
+        "risk": {
+          "breakeven": null,
+          "delta": -0.16685892,
+          "distance_to_strike_pct": 0.225775,
+          "dte": 45,
+          "margin_buffer": 0.225775,
+          "spot": 284.154999,
+          "strike": 220.0
+        },
+        "timing": {
+          "bb_distance_pct": 52.52,
+          "rsi_12": 84.32,
+          "rsi_14": 85.26,
+          "rsi_24": 80.13,
+          "rsi_6": 91.06
+        },
+        "volatility": {
+          "iv": 0.926003,
+          "iv_rank": 64.0,
+          "iv_rank_source": "rv_proxy"
+        }
+      },
+      "reasons": [
+        {
+          "code": "quality_b",
+          "current": "B",
+          "dimension": "data_quality",
+          "message": "数据可观察但存在降级标记，入场前需复核",
+          "passed": true,
+          "severity": "warn",
+          "threshold": null
+        },
+        {
+          "code": "spread_pass",
+          "current": 0.0,
+          "dimension": "liquidity",
+          "message": "价差处于可接受范围",
+          "passed": true,
+          "severity": "positive",
+          "threshold": 0.1
+        },
+        {
+          "code": "oi_pass",
+          "current": 50,
+          "dimension": "liquidity",
+          "message": "未平仓量满足最低要求",
+          "passed": true,
+          "severity": "positive",
+          "threshold": 50
+        },
+        {
+          "code": "dte_pass",
+          "current": 45,
+          "dimension": "risk",
+          "message": "DTE 位于策略窗口内",
+          "passed": true,
+          "severity": "positive",
+          "threshold": {
+            "max": 60,
+            "min": 21
+          }
+        },
+        {
+          "code": "margin_buffer_pass",
+          "current": 0.225775,
+          "dimension": "risk",
+          "message": "安全垫满足最低要求",
+          "passed": true,
+          "severity": "positive",
+          "threshold": 0.1
+        },
+        {
+          "code": "delta_pass",
+          "current": 0.16685892,
+          "dimension": "risk",
+          "message": "Delta 位于偏好的卖 Put 区间",
+          "passed": true,
+          "severity": "positive",
+          "threshold": {
+            "max": 0.18,
+            "min": 0.05
+          }
+        },
+        {
+          "code": "roi_pass",
+          "current": 0.353939,
+          "dimension": "return",
+          "message": "年化收益率达到最低要求",
+          "passed": true,
+          "severity": "positive",
+          "threshold": 0.2
+        },
+        {
+          "code": "iv_rank_pass",
+          "current": 64.0,
+          "dimension": "volatility",
+          "message": "IV Rank 满足当前设置",
+          "passed": true,
+          "severity": "positive",
+          "threshold": 20.0
+        },
+        {
+          "code": "timing_overbought_extreme",
+          "current": 85.26,
+          "dimension": "timing",
+          "message": "RSI(14) 极度超买，标的短期可能大幅回调，慎开新 Put",
+          "passed": false,
+          "severity": "warn",
+          "threshold": 80
+        }
+      ],
+      "right": "P",
+      "schema": "entry_signal_v1",
+      "source": {
+        "latest_candidate_id": null,
+        "option_pool_id": null,
+        "scan_run_id": null
+      },
+      "status": "OPENABLE",
+      "strike": 220.0,
+      "summary": "核心条件满足，可考虑开仓；但数据可观察但存在降级标记，入场前需复核。",
+      "symbol": "MRVL"
+    },
+    "entry_signal_score": 68,
+    "entry_signal_status": "OPENABLE",
+    "entry_signal_summary": "核心条件满足，可考虑开仓；但数据可观察但存在降级标记，入场前需复核。",
+    "greeks_source": "provider",
+    "intraday_bs": {
+      "bar_count": 4,
+      "basis": "entry_premium_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-06-03",
+        "start_date_et": "2026-06-02"
+      },
+      "fetched_at": "2026-06-04T08:15:40.768102+00:00",
+      "hold_window": {
+        "close_date_et": "2026-06-03",
+        "open_date_et": "2026-06-02"
+      },
+      "interval": "1d_hl",
+      "iv_source": "massive_eod_backfit",
+      "mae_pnl_pct": -0.782321,
+      "mfe_pnl_pct": 0.410749,
+      "model": "daily_hl_bs_eod_iv",
+      "option_ticker": "O:MRVL260717P00220000",
+      "source": "intraday_bs"
+    },
+    "iv": 0.926003,
+    "iv_rank": 64.0,
+    "iv_rank_source": "rv_proxy",
+    "margin_buffer": 0.225775,
+    "massive": {
+      "bar_count": 2,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-06-03",
+        "start_date_et": "2026-06-02"
+      },
+      "fetched_at": "2026-06-04T08:15:39.355745+00:00",
+      "hold_window": {
+        "close_date_et": "2026-06-03",
+        "open_date_et": "2026-06-02"
+      },
+      "mae_pnl_pct": 0.0,
+      "mfe_pnl_pct": 0.090625,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:MRVL260717P00220000",
+      "source": "massive"
+    },
+    "pool_source": "manual",
+    "quality_flags": [
+      "provider_delayed",
+      "iv_rank_proxy",
+      "volume_missing",
+      "snapshot_inferred"
+    ],
+    "quality_grade": "B",
+    "quality_score": 95,
+    "replay_model": "bs_daily_close_constant_iv",
+    "rsi_12": 84.32,
+    "rsi_14": 85.26,
+    "rsi_24": 80.13,
+    "rsi_6": 91.06,
+    "spot": 284.154999,
+    "state_features": {
+      "bb_lower_distance_pct": 52.52,
+      "bb_zscore": 3.502958,
+      "hv30": 1.009705,
+      "iv30": null,
+      "iv_rank_true": null,
+      "macd_bias_pct": 2.136931,
+      "regime": "unknown",
+      "rsi_14": 85.26,
+      "skew": null,
+      "vix": null,
+      "vrp": null
+    },
+    "theta": -0.24964919,
+    "vega": 0.24947048
+  },
+  "position_id": 15
+}

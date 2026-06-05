@@ -1,0 +1,15 @@
+{
+  "filters_applied": {
+    "include_deleted": false,
+    "min_sample": 5,
+    "pool": "all",
+    "score_buckets": [
+      60,
+      80
+    ],
+    "since": null,
+    "symbols": null,
+    "until": null
+  },
+  "suggestions": []
+}

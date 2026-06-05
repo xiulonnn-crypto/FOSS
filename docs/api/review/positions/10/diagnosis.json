@@ -1,0 +1,68 @@
+{
+  "dimension_summary": [
+    {
+      "bucket": "B",
+      "bucket_label": "B 可观察",
+      "dimension": "quality_grade",
+      "label": "数据质量"
+    },
+    {
+      "bucket": "OPENABLE",
+      "bucket_label": "可开仓",
+      "dimension": "entry_signal_status",
+      "label": "开仓信号"
+    },
+    {
+      "bucket": "target_0_10_0_20",
+      "bucket_label": "0.10 < |Delta| ≤ 0.20",
+      "dimension": "delta_abs",
+      "label": "Delta"
+    },
+    {
+      "bucket": "d22_45",
+      "bucket_label": "22-45 天",
+      "dimension": "dte",
+      "label": "DTE"
+    },
+    {
+      "bucket": "gt_70",
+      "bucket_label": "> 70",
+      "dimension": "iv_rank",
+      "label": "IV Rank"
+    },
+    {
+      "bucket": "gte_0_15",
+      "bucket_label": "≥ 15%",
+      "dimension": "margin_buffer",
+      "label": "安全垫"
+    },
+    {
+      "bucket": "neutral",
+      "bucket_label": "中性 (30-70)",
+      "dimension": "rsi",
+      "label": "RSI"
+    },
+    {
+      "bucket": "manual",
+      "bucket_label": "手动",
+      "dimension": "close_reason",
+      "label": "平仓原因"
+    },
+    {
+      "bucket": "manual",
+      "bucket_label": "手动录入",
+      "dimension": "pool_source",
+      "label": "来源池"
+    }
+  ],
+  "highlights": [],
+  "lowlights": [
+    {
+      "text": "入场时数据质量为 B 级"
+    },
+    {
+      "text": "持仓天数极短（0天），Theta 收取有限"
+    }
+  ],
+  "position_id": 10
+}

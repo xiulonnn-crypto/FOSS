@@ -1,0 +1,145 @@
+{
+  "candidate_data": null,
+  "close_snapshot": {
+    "close_notes": null,
+    "close_premium": 22.5,
+    "closed_at": "2026-05-21T13:30:00+00:00",
+    "exit_signal": {
+      "action": "UNKNOWN",
+      "exit_signal_id": 132,
+      "expiration": "2026-06-18",
+      "generated_at": "2026-05-21T12:44:31.200185+00:00",
+      "id": 132,
+      "is_latest": true,
+      "legacy_signals": [],
+      "metrics": {
+        "current_mid": null,
+        "delta": null,
+        "dte": 28,
+        "holding_days": 7,
+        "margin_buffer": null,
+        "open_premium": 23.0,
+        "pnl_pct": null,
+        "spot": null,
+        "strike": 620.0,
+        "unrealized_pnl_usd": null
+      },
+      "position_id": 9,
+      "radar_snapshot_id": null,
+      "reasons": [
+        {
+          "code": "mark_unavailable",
+          "current": {
+            "quote_error": "get_quote(MU) failed: 'NoneType' object is not subscriptable"
+          },
+          "dimension": "data_quality",
+          "message": "行情或持仓标记失败，不能形成可靠平仓动作",
+          "passed": false,
+          "severity": "warn",
+          "threshold": "valid mark"
+        },
+        {
+          "code": "mark_missing_fields",
+          "current": [
+            "spot",
+            "current_mid",
+            "pnl_pct",
+            "margin_buffer"
+          ],
+          "dimension": "data_quality",
+          "message": "行情标记缺少出场判断所需字段",
+          "passed": false,
+          "severity": "warn",
+          "threshold": [
+            "spot",
+            "current_mid",
+            "pnl_pct",
+            "margin_buffer"
+          ]
+        }
+      ],
+      "schema": "exit_signal_v1",
+      "severity": "warn",
+      "source": {
+        "latest_entry_signal_id": null,
+        "mark_basis": null,
+        "radar_snapshot_id": null
+      },
+      "strike": 620.0,
+      "suggested_close_reason": null,
+      "summary": "行情标记缺少出场判断所需字段",
+      "symbol": "MU",
+      "urgency_score": 4
+    },
+    "exit_signal_id": 132,
+    "mark": {
+      "delta": -6.518528938848078e-09,
+      "margin_buffer": 0.1754,
+      "mark_basis": "bs",
+      "option_bs": 2.839275534319879e-08,
+      "option_mid": 2.839275534319879e-08,
+      "pnl_pct": 1.0,
+      "radar_snapshot_id": 182,
+      "spot": 751.8400268554688,
+      "spot_asof": "2026-05-21T09:46:14.094533-04:00",
+      "unrealized_pnl_usd": 2300.0
+    },
+    "realized_pnl": 48.0,
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "manual"
+  },
+  "open_snapshot": {
+    "annualized_roi": 0.5723,
+    "bb_distance_pct": 55.42,
+    "delta": -0.2352322251347354,
+    "dte": 34,
+    "intraday_bs": {
+      "bar_count": 12,
+      "basis": "entry_premium_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-21",
+        "start_date_et": "2026-05-14"
+      },
+      "fetched_at": "2026-05-21T14:16:03.941967+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-21",
+        "open_date_et": "2026-05-14"
+      },
+      "interval": "1d_hl",
+      "iv_source": "entry_snapshot_const",
+      "mae_pnl_pct": -1.122521,
+      "mfe_pnl_pct": 0.284855,
+      "model": "daily_hl_bs_eod_iv",
+      "option_ticker": "O:MU260618P00620000",
+      "source": "intraday_bs"
+    },
+    "iv": 0.8922740264892577,
+    "iv_rank": 96.6,
+    "massive": {
+      "bar_count": 5,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-21",
+        "start_date_et": "2026-05-14"
+      },
+      "fetched_at": "2026-05-21T13:46:19.483519+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-21",
+        "open_date_et": "2026-05-14"
+      },
+      "mae_pnl_pct": -0.663043,
+      "mfe_pnl_pct": 0.0,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:MU260618P00620000",
+      "source": "massive"
+    },
+    "rsi_12": 81.82,
+    "rsi_24": 79.66,
+    "rsi_6": 70.88,
+    "score": 0.7563,
+    "spot": 724.14501953125,
+    "theta": -0.8668221987579658,
+    "vega": 0.6795476579418707
+  },
+  "position_id": 9
+}

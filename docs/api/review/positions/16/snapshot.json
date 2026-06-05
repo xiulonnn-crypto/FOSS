@@ -1,0 +1,147 @@
+{
+  "candidate_data": null,
+  "close_snapshot": {
+    "close_notes": null,
+    "close_premium": 11.9,
+    "closed_at": "2026-06-04T15:24:00+00:00",
+    "exit_signal": {
+      "action": "TIME_EXIT",
+      "expiration": "2026-06-18",
+      "generated_at": "2026-06-05T02:30:51.926940+00:00",
+      "legacy_signals": [
+        "time_14d"
+      ],
+      "metrics": {
+        "current_mid": 12.05,
+        "delta": -0.05958187047069452,
+        "dte": 13,
+        "holding_days": 2,
+        "margin_buffer": 0.2896,
+        "open_premium": 13.0,
+        "pnl_pct": 0.0731,
+        "spot": 1759.6800537109375,
+        "strike": 1250.0,
+        "unrealized_pnl_usd": 95.0
+      },
+      "position_id": 16,
+      "reasons": [
+        {
+          "code": "mark_complete",
+          "current": {
+            "current_mid": 12.05,
+            "margin_buffer": 0.2896,
+            "pnl_pct": 0.0731,
+            "spot": 1759.6800537109375
+          },
+          "dimension": "data_quality",
+          "message": "行情标记字段完整",
+          "passed": true,
+          "severity": "info",
+          "threshold": [
+            "spot",
+            "current_mid",
+            "pnl_pct",
+            "margin_buffer"
+          ]
+        },
+        {
+          "code": "time_14d",
+          "current": 13,
+          "dimension": "time",
+          "message": "剩余天数已进入 14 天管理窗口",
+          "passed": false,
+          "severity": "warn",
+          "threshold": 14
+        }
+      ],
+      "schema": "exit_signal_v1",
+      "severity": "warn",
+      "source": {
+        "latest_entry_signal_id": null,
+        "mark_basis": "mid",
+        "radar_snapshot_id": 314
+      },
+      "strike": 1250.0,
+      "suggested_close_reason": "time_14d",
+      "summary": "行情标记字段完整",
+      "symbol": "SNDK",
+      "urgency_score": 72
+    },
+    "exit_signal_id": null,
+    "mark": {
+      "delta": -0.05958187047069452,
+      "margin_buffer": 0.2896,
+      "mark_basis": "mid",
+      "option_bs": 11.847938195860735,
+      "option_mid": 12.05,
+      "pnl_pct": 0.0731,
+      "radar_snapshot_id": 314,
+      "spot": 1759.6800537109375,
+      "spot_asof": "2026-06-04T22:30:50.857298-04:00",
+      "unrealized_pnl_usd": 95.0
+    },
+    "realized_pnl": 108.0,
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "manual"
+  },
+  "open_snapshot": {
+    "bb_distance_pct": 32.18,
+    "intraday_bs": {
+      "bar_count": 4,
+      "basis": "entry_premium_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-06-04",
+        "start_date_et": "2026-06-03"
+      },
+      "fetched_at": "2026-06-05T02:30:55.090614+00:00",
+      "hold_window": {
+        "close_date_et": "2026-06-04",
+        "open_date_et": "2026-06-03"
+      },
+      "interval": "1d_hl",
+      "iv_source": "massive_eod_backfit",
+      "mae_pnl_pct": -0.624099,
+      "mfe_pnl_pct": 1.0,
+      "model": "daily_hl_bs_eod_iv",
+      "option_ticker": "O:SNDK260618P01250000",
+      "source": "intraday_bs"
+    },
+    "massive": {
+      "bar_count": 1,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-06-04",
+        "start_date_et": "2026-06-03"
+      },
+      "fetched_at": "2026-06-05T02:30:53.461915+00:00",
+      "hold_window": {
+        "close_date_et": "2026-06-04",
+        "open_date_et": "2026-06-03"
+      },
+      "mae_pnl_pct": null,
+      "mfe_pnl_pct": null,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:SNDK260618P01250000",
+      "source": "massive"
+    },
+    "pool_source": "manual",
+    "rsi_12": 76.72,
+    "rsi_14": 74.14,
+    "rsi_24": 73.44,
+    "rsi_6": 86.29,
+    "state_features": {
+      "bb_lower_distance_pct": 32.18,
+      "bb_zscore": 2.124399,
+      "hv30": 0.923303,
+      "iv30": null,
+      "iv_rank_true": null,
+      "macd_bias_pct": 0.788372,
+      "regime": "unknown",
+      "rsi_14": 74.14,
+      "skew": null,
+      "vix": null,
+      "vrp": null
+    }
+  },
+  "position_id": 16
+}

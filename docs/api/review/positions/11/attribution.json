@@ -1,0 +1,19 @@
+{
+  "data_available": true,
+  "days_held": 4,
+  "delta_contribution": 1303.0747822276412,
+  "entry_delta": -0.14821978083877863,
+  "entry_theta": -0.8198107883931612,
+  "entry_vega": 0.48799624555009086,
+  "iv_open": 0.9592289233398437,
+  "mae": -0.040900000000000006,
+  "mae_mfe_flat_replay": false,
+  "mfe": 0.9121,
+  "position_id": 11,
+  "radar_points": 33,
+  "residual": -782.9990975849057,
+  "spot_close": 849.635009765625,
+  "spot_open": 761.719970703125,
+  "theta_contribution": 327.9243153572645,
+  "total_pnl": 848.0
+}

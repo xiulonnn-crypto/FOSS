@@ -1,0 +1,79 @@
+{
+  "candidate_data": null,
+  "close_snapshot": {
+    "close_notes": null,
+    "close_premium": 2.4,
+    "closed_at": "2026-05-07T18:51:00+00:00",
+    "exit_signal": null,
+    "exit_signal_id": null,
+    "mark": {
+      "current_mid": 2.4,
+      "delta": -0.131701,
+      "iv": 1.059161,
+      "margin_buffer": 0.058558,
+      "mark_basis": "bs_daily_close_constant_iv_replay",
+      "option_mid": 2.4,
+      "pnl_pct": 0.04,
+      "spot": 637.320007
+    },
+    "realized_pnl": 8.0,
+    "replay_model": "bs_daily_close_constant_iv",
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "manual"
+  },
+  "open_snapshot": {
+    "annualized_roi": 1.520833,
+    "bb_distance_pct": 42.08,
+    "delta": -0.13647446,
+    "dte": 1,
+    "intraday_bs": {
+      "bar_count": 2,
+      "basis": "entry_premium_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-07",
+        "start_date_et": "2026-05-07"
+      },
+      "fetched_at": "2026-05-17T17:37:16.961291+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-07",
+        "open_date_et": "2026-05-07"
+      },
+      "interval": "hold_window_hl",
+      "iv_source": "implied_iv_open_fill_hold_window",
+      "mae_pnl_pct": -0.155727,
+      "mfe_pnl_pct": 0.04,
+      "model": "daily_hl_bs_eod_iv",
+      "option_ticker": "O:MU260508P00600000",
+      "source": "intraday_bs"
+    },
+    "iv": 1.059161,
+    "massive": {
+      "bar_count": 1,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-07",
+        "start_date_et": "2026-05-07"
+      },
+      "fetched_at": "2026-05-17T17:37:14.859775+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-07",
+        "open_date_et": "2026-05-07"
+      },
+      "mae_pnl_pct": null,
+      "mfe_pnl_pct": null,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:MU260508P00600000",
+      "source": "massive"
+    },
+    "pool_source": "manual",
+    "replay_model": "bs_daily_close_constant_iv",
+    "rsi_12": 80.99,
+    "rsi_14": 74.79,
+    "rsi_24": 81.89,
+    "rsi_6": 82.66,
+    "spot": 636.539978,
+    "theta": -3.84855366,
+    "vega": 0.07287982
+  },
+  "position_id": 4
+}

@@ -1,0 +1,59 @@
+{
+  "candidate_data": null,
+  "close_snapshot": {
+    "close_notes": null,
+    "close_premium": null,
+    "closed_at": "2026-05-08T20:00:00+00:00",
+    "exit_signal": null,
+    "exit_signal_id": null,
+    "mark": {
+      "current_mid": null,
+      "delta": 0.0,
+      "iv": 0.707948,
+      "margin_buffer": 0.09647,
+      "mark_basis": "bs_daily_close_constant_iv_replay",
+      "option_mid": null,
+      "pnl_pct": 1.0,
+      "spot": 747.070007
+    },
+    "realized_pnl": 109.0,
+    "replay_model": "bs_daily_close_constant_iv",
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "expired_otm"
+  },
+  "open_snapshot": {
+    "annualized_roi": 0.594815,
+    "bb_distance_pct": 48.77,
+    "delta": 0.0,
+    "dte": 1,
+    "iv": 0.707948,
+    "massive": {
+      "bar_count": 1,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-08",
+        "start_date_et": "2026-05-08"
+      },
+      "fetched_at": "2026-05-17T17:28:44.410540+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-08",
+        "open_date_et": "2026-05-08"
+      },
+      "mae_pnl_pct": null,
+      "mfe_pnl_pct": null,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:MU260508P00675000",
+      "source": "massive"
+    },
+    "pool_source": "manual",
+    "replay_model": "bs_daily_close_constant_iv",
+    "rsi_12": 85.04,
+    "rsi_14": 81.87,
+    "rsi_24": 85.65,
+    "rsi_6": 91.39,
+    "spot": 708.950012,
+    "theta": 0.0,
+    "vega": 0.0
+  },
+  "position_id": 5
+}

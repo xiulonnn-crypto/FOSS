@@ -1,0 +1,94 @@
+{
+  "candidate_data": {
+    "annualized_roi": 0.7081,
+    "delta": -0.13272249172869954,
+    "dte": 9,
+    "iv": 0.9694216925048829,
+    "iv_rank": 100.0,
+    "score": 0.7518,
+    "spot": 725.27001953125,
+    "theta": -1.3033923058006793,
+    "vega": 0.24439519271982138
+  },
+  "close_snapshot": {
+    "close_notes": "",
+    "close_premium": 5.82,
+    "closed_at": "2026-05-13T13:38:54.332687+00:00",
+    "exit_signal": null,
+    "exit_signal_id": null,
+    "mark": {
+      "current_mid": 5.82,
+      "delta": -0.057324,
+      "iv": 1.01914,
+      "margin_buffer": 0.212238,
+      "mark_basis": "bs_daily_close_constant_iv_replay",
+      "option_mid": 5.82,
+      "pnl_pct": 0.493913,
+      "spot": 787.039978
+    },
+    "realized_pnl": 567.0,
+    "replay_model": "bs_daily_close_constant_iv",
+    "schema": "position_close_snapshot_v1",
+    "selected_close_reason": "manual"
+  },
+  "open_snapshot": {
+    "annualized_roi": 0.677016,
+    "bb_distance_pct": 51.92,
+    "delta": -0.1650361,
+    "dte": 10,
+    "intraday_bs": {
+      "bar_count": 4,
+      "basis": "entry_premium_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-13",
+        "start_date_et": "2026-05-12"
+      },
+      "fetched_at": "2026-05-17T17:16:56.885976+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-13",
+        "open_date_et": "2026-05-12"
+      },
+      "interval": "1d_hl",
+      "iv_source": "massive_eod_backfit",
+      "mae_pnl_pct": -0.226889,
+      "mfe_pnl_pct": 1.047251,
+      "model": "daily_hl_bs_eod_iv",
+      "option_ticker": "O:MU260522P00620000",
+      "source": "intraday_bs"
+    },
+    "iv": 1.01914,
+    "iv_rank": 100.0,
+    "margin_buffer": 0.1451,
+    "massive": {
+      "bar_count": 2,
+      "basis": "first_bar_excursion_pct",
+      "fetch_clip": {
+        "end_date_et": "2026-05-13",
+        "start_date_et": "2026-05-12"
+      },
+      "fetched_at": "2026-05-17T17:16:55.550226+00:00",
+      "hold_window": {
+        "close_date_et": "2026-05-13",
+        "open_date_et": "2026-05-12"
+      },
+      "mae_pnl_pct": 0.0,
+      "mfe_pnl_pct": 0.382609,
+      "model": "eod_option_daily_close",
+      "option_ticker": "O:MU260522P00620000",
+      "source": "massive"
+    },
+    "pool_source": "manual",
+    "quality_flags": [],
+    "quality_grade": "unknown",
+    "replay_model": "bs_daily_close_constant_iv",
+    "rsi_12": 74.35,
+    "rsi_14": 70.72,
+    "rsi_24": 76.18,
+    "rsi_6": 71.37,
+    "score": 0.7518,
+    "spot": 719.5,
+    "theta": -1.4905811,
+    "vega": 0.29566873
+  },
+  "position_id": 1
+}
