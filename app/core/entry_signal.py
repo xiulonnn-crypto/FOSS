@@ -5,6 +5,9 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 
+from app.core.features import detect_dip_event
+
+
 ENTRY_SIGNAL_SCHEMA = "entry_signal_v1"
 
 # `state_features` (features.py StateFeatures) → flat row keys consumed by
@@ -17,6 +20,8 @@ _STATE_FEATURE_ALIASES: Tuple[Tuple[str, str], ...] = (
     ("rsi_12", "rsi_12"),
     ("rsi_24", "rsi_24"),
     ("bb_lower_distance_pct", "bb_distance_pct"),
+    ("bb_zscore", "bb_zscore"),
+    ("trend_mode", "trend_mode"),
 )
 ENTRY_SIGNAL_STATUSES = frozenset({"OPENABLE", "WAIT", "REJECT", "EXPIRED", "UNKNOWN"})
 
@@ -180,7 +185,10 @@ def build_entry_signal(
             add("iv_rank_pass", "volatility", "positive", "IV Rank 满足当前设置", current=iv_rank, threshold=min_iv_rank, passed=True)
 
     _add_watch_target_reasons(add, row, watch_row)
-    _add_timing_reasons(add, row)
+    trend_mode = str(row.get("trend_mode") or "STANDARD").upper()
+    if trend_mode not in {"STRONG_TREND", "STANDARD"}:
+        trend_mode = "STANDARD"
+    prime_bonus = _add_timing_reasons(add, row, settings, trend_mode=trend_mode)
 
     decision_score = _decision_score(
         score=score,
@@ -188,8 +196,16 @@ def build_entry_signal(
         positives=len(positives),
         warnings=len(warnings),
         blockers=len(blockers),
+        prime_bonus=prime_bonus,
     )
-    status = _status_for(blockers, warnings, decision_score, expiration, today_d)
+    status = _status_for(
+        blockers,
+        warnings,
+        decision_score,
+        expiration,
+        today_d,
+        trend_mode=trend_mode,
+    )
     summary = _summary_for(status, positives, warnings, blockers)
 
     signal = {
@@ -233,7 +249,14 @@ def _add_watch_target_reasons(add: Any, row: Dict[str, Any], watch_row: Optional
             add(f"{code}_not_met", dimension, "warn", wait_message, current=actual, threshold=target, passed=False)
 
 
-def _add_timing_reasons(add: Any, row: Dict[str, Any]) -> None:
+def _add_timing_reasons(
+    add: Any,
+    row: Dict[str, Any],
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    trend_mode: str = "STANDARD",
+) -> int:
+    """Append timing reasons; return prime-entry bonus for decision_score."""
     # RSI(14) Wilder — industry-standard momentum oscillator.
     # For Cash-Secured Short Put sellers: oversold = ideal entry (high IV, mean-reversion edge).
     # Thresholds follow tastytrade / ThinkorSwim / OptionAlpha convention: 30 / 50 / 70.
@@ -276,7 +299,13 @@ def _add_timing_reasons(add: Any, row: Dict[str, Any]) -> None:
             )
 
     bb_distance = _to_float(row.get("bb_distance_pct"))
-    if bb_distance is not None:
+    bb_zscore_val = _to_float(row.get("bb_zscore"))
+    exempt_below_band = (
+        trend_mode == "STRONG_TREND"
+        and bb_zscore_val is not None
+        and bb_zscore_val <= 0.0
+    )
+    if bb_distance is not None and not exempt_below_band:
         if bb_distance < 0:
             add(
                 "timing_below_lower_band", "timing", "warn",
@@ -290,6 +319,53 @@ def _add_timing_reasons(add: Any, row: Dict[str, Any]) -> None:
                 current=bb_distance, threshold=5, passed=True,
             )
 
+    iv_rank = _to_float(row.get("iv_rank"))
+    dip = detect_dip_event(
+        bb_zscore_val,
+        bb_distance,
+        rsi_14,
+        iv_rank,
+        settings,
+        trend_mode=trend_mode,
+    )
+    if dip.tier == 3:
+        add(
+            "timing_prime_entry_extreme", "timing", "positive",
+            "价格深入 -3σ 且高 IV 溢价，理想开仓事件",
+            current={"bb_zscore": bb_zscore_val, "iv_rank": iv_rank},
+            threshold=-3.0,
+            passed=True,
+        )
+        return 12
+    if dip.tier == 2:
+        add(
+            "timing_prime_entry", "timing", "positive",
+            "价格触及 -2σ 通道且 IVR≥50%，均值回归卖 Put 的高夏普窗口",
+            current={"bb_zscore": bb_zscore_val, "iv_rank": iv_rank},
+            threshold=-2.0,
+            passed=True,
+        )
+        return 8
+    if dip.tier == 1:
+        if trend_mode == "STRONG_TREND":
+            add(
+                "timing_near_middle", "timing", "positive",
+                "价格回踩中轨附近，强趋势中的战术观察位",
+                current={"bb_zscore": bb_zscore_val, "iv_rank": iv_rank},
+                threshold=0.5,
+                passed=True,
+            )
+        else:
+            add(
+                "timing_bb_pullback", "timing", "positive",
+                "价格在 -1σ 至 -2σ 通道，战术观察位，可关注溢价",
+                current={"bb_zscore": bb_zscore_val, "iv_rank": iv_rank},
+                threshold=-1.0,
+                passed=True,
+            )
+        return 3
+    return 0
+
 
 def _status_for(
     blockers: List[Dict[str, Any]],
@@ -297,11 +373,17 @@ def _status_for(
     decision_score: int,
     expiration: Optional[date],
     today: date,
+    *,
+    trend_mode: str = "STANDARD",
 ) -> str:
     if expiration is not None and expiration < today:
         return "EXPIRED"
     if blockers:
         return "REJECT"
+    if trend_mode == "STRONG_TREND":
+        wait_codes = {r.get("code") for r in warnings}
+        if "timing_overbought" in wait_codes or "timing_overbought_extreme" in wait_codes:
+            return "WAIT"
     wait_codes = {r.get("code") for r in warnings}
     if wait_codes & {"roi_below_target", "spread_wide_wait", "target_premium_not_met", "target_score_not_met", "target_margin_buffer_not_met", "pool_stale"}:
         return "WAIT"
@@ -319,6 +401,7 @@ def _decision_score(
     positives: int,
     warnings: int,
     blockers: int,
+    prime_bonus: int = 0,
 ) -> int:
     base = 45.0
     if score is not None:
@@ -328,6 +411,7 @@ def _decision_score(
     base += min(15.0, positives * 1.5)
     base -= min(20.0, warnings * 3.0)
     base -= min(35.0, blockers * 10.0)
+    base += float(prime_bonus)
     return int(round(max(0.0, min(100.0, base))))
 
 
@@ -392,6 +476,8 @@ def _metrics(row: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             "rsi_12": _to_float(row.get("rsi_12")),
             "rsi_24": _to_float(row.get("rsi_24")),
             "bb_distance_pct": _to_float(row.get("bb_distance_pct")),
+            "bb_zscore": _to_float(row.get("bb_zscore")),
+            "trend_mode": row.get("trend_mode"),
         },
         "data_quality": {
             "quality_grade": _quality_grade(row.get("quality_grade")),

@@ -30,6 +30,7 @@ from app.core.review_suggestions import (
     build_suggestions,
 )
 from app.core.open_snapshot import build_open_snapshot_dict
+from app.core.underlying_candles import build_underlying_candles
 from app.core.pnl_excursion import relative_mae_mfe_from_pnls_chronologic
 from app.core.pnl_excursion_intraday import enrich_closed_position_intraday_bs
 from app.core.time_et import APP_TZ, parse_instant_utc
@@ -1040,6 +1041,22 @@ def position_snapshot(position_id: int):
         "close_snapshot": pos.get("close_snapshot"),
         "candidate_data": candidate_data,
     })
+
+
+@bp_review.route("/positions/<int:position_id>/underlying_candles")
+def position_underlying_candles(position_id: int):
+    """标的小时蜡烛序列 + 入场/出场时间点与对应标的价（复盘抽屉图表用）。"""
+    repo: Repo = current_app.config["REPO"]
+    try:
+        payload = build_underlying_candles(repo, position_id)
+    except Exception as exc:
+        current_app.logger.warning(
+            "underlying_candles failed position_id=%s: %s", position_id, exc
+        )
+        return jsonify({"available": False, "reason": "error"})
+    if payload.get("reason") == "position_not_found":
+        return jsonify(payload), 404
+    return jsonify(payload)
 
 
 @bp_review.route("/positions/<int:position_id>/diagnosis")

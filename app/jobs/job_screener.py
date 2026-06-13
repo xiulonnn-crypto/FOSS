@@ -313,6 +313,7 @@ def run_screener(
                             provider_name=provider.name,
                             provider_realtime=provider.realtime,
                             earnings_known=earnings_known,
+                            state_features=symbol_state_features,
                         )
                         scored = scored_result["candidates"]
                         _merge_strategy_diagnostics(

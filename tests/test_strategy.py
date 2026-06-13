@@ -65,6 +65,7 @@ SETTINGS = {
         "spread_pct": 0.15,
         "margin_buffer": 0.15,
         "open_interest": 0.10,
+        "dip_event": 0.10,
     },
 }
 
@@ -210,3 +211,25 @@ def test_no_signals_healthy_position():
         current_delta=-0.15, settings=SETTINGS
     )
     assert signals == []
+
+
+def test_dip_event_raises_score_when_state_features_present():
+    c = _make_contract()
+    base_row = derive_csp_candidate_row(c, QUOTE, SETTINGS)
+    dip_features = {
+        "bb_zscore": -2.5,
+        "bb_lower_distance_pct": -1.0,
+        "rsi_14": 40.0,
+    }
+    dip_row = derive_csp_candidate_row(c, QUOTE, SETTINGS, state_features=dip_features)
+    assert base_row is not None and dip_row is not None
+    assert dip_row["score"] > base_row["score"]
+    assert dip_row["score"] <= 1.0
+    assert dip_row["dip_tier"] == 2
+
+
+def test_dip_event_no_bonus_without_state_features():
+    c = _make_contract()
+    row = derive_csp_candidate_row(c, QUOTE, SETTINGS)
+    assert row is not None
+    assert row.get("dip_tier", 0) == 0

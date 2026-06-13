@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.data_quality import ContractQuality, evaluate_contract_quality
 from app.core.exit_signal import build_exit_signal
+from app.core.features import detect_dip_event
 from app.core.types import OptionContract, Quote
 
 
@@ -14,10 +15,35 @@ def _normalize(x: float, lo: float, hi: float) -> float:
     return max(0.0, min(1.0, (x - lo) / (hi - lo)))
 
 
+def _dip_score_bonus(
+    settings: Dict[str, Any],
+    state_features: Optional[Dict[str, Any]],
+    iv_rank: Optional[float],
+) -> tuple[float, int]:
+    """Return (score bonus, dip_tier) from event-driven dip detection."""
+    if not state_features:
+        return 0.0, 0
+    dip = detect_dip_event(
+        state_features.get("bb_zscore"),
+        state_features.get("bb_lower_distance_pct"),
+        state_features.get("rsi_14"),
+        iv_rank,
+        settings,
+    )
+    w_dip = float((settings.get("scoring_weights") or {}).get("dip_event", 0.10))
+    if dip.tier == 2:
+        return w_dip, 2
+    if dip.tier == 3:
+        return w_dip * 1.5, 3
+    return 0.0, 0
+
+
 def derive_csp_candidate_row(
     c: OptionContract,
     quote: Quote,
     settings: Dict[str, Any],
+    *,
+    state_features: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build one short-put candidate dict (same shape as score_csp_candidates rows).
 
@@ -47,13 +73,15 @@ def derive_csp_candidate_row(
     breakeven = c.strike - mid
     pop = 1.0 - abs_delta
     wts = settings.get("scoring_weights", {})
-    score = (
+    base = (
         wts.get("annualized_roi", 0.35) * _normalize(annualized_roi, 0.15, 0.50)
         + wts.get("iv_rank", 0.25) * _normalize(iv_rank or 50.0, 30.0, 90.0)
         + wts.get("spread_pct", 0.15) * (1.0 - _normalize(spread_pct, 0.02, 0.15))
         + wts.get("margin_buffer", 0.15) * _normalize(margin_buffer, 0.05, 0.30)
         + wts.get("open_interest", 0.10) * _normalize(float(oi), 50.0, 5000.0)
     )
+    bonus, dip_tier = _dip_score_bonus(settings, state_features, iv_rank)
+    score = min(1.0, base + bonus)
     return {
         "symbol": c.symbol,
         "expiration": str(c.expiration),
@@ -75,6 +103,7 @@ def derive_csp_candidate_row(
         "breakeven": round(breakeven, 4),
         "margin_buffer": round(margin_buffer, 4),
         "score": round(score, 4),
+        "dip_tier": dip_tier,
         "open_interest": oi,
     }
 
@@ -98,6 +127,8 @@ def score_csp_candidates(
     quote: Quote,
     settings: Dict[str, Any],
     earnings_date: Optional[date] = None,
+    *,
+    state_features: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Filter and score Short Put candidates.
@@ -108,6 +139,7 @@ def score_csp_candidates(
         quote,
         settings,
         earnings_date=earnings_date,
+        state_features=state_features,
     )
     return result["candidates"]
 
@@ -151,6 +183,7 @@ def score_csp_candidates_with_diagnostics(
     provider_realtime: Optional[bool] = None,
     earnings_known: Optional[bool] = None,
     provider_error: bool = False,
+    state_features: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Filter and score CSP candidates, with quality diagnostics for rejected rows.
@@ -199,7 +232,9 @@ def score_csp_candidates_with_diagnostics(
             )
             continue
 
-        row = derive_csp_candidate_row(c, quote, settings)
+        row = derive_csp_candidate_row(
+            c, quote, settings, state_features=state_features
+        )
         if row is None:
             diagnostics["rejected_count"] += 1
             _count_rejection(diagnostics, "invalid_bid_ask")

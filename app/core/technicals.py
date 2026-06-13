@@ -86,6 +86,13 @@ def compute_bb_lower_distance_pct(
     return round((last_close - lower_band) / last_close * 100, 2)
 
 
+def compute_sma(closes: List[float], window: int) -> Optional[float]:
+    """Simple moving average of the last ``window`` closes."""
+    if len(closes) < window:
+        return None
+    return round(sum(closes[-window:]) / window, 6)
+
+
 def compute_bb_zscore(closes: List[float], window: int = 20) -> Optional[float]:
     """Return last close's Z-score versus its Bollinger midline window."""
     if len(closes) < window:

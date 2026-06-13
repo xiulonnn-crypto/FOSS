@@ -832,6 +832,7 @@ class Repo:
         max_dte: Optional[int] = None,
         entry_signal_status: Any = None,
         min_entry_signal_score: Optional[int] = None,
+        max_per_symbol: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         where: List[str] = []
         params: List[Any] = []
@@ -874,7 +875,18 @@ class Repo:
                 "ORDER BY COALESCE(op.score, -1) DESC, op.last_seen_at DESC",
                 params,
             ).fetchall()
-        return [_option_pool_from_row(row) for row in rows]
+        result = [_option_pool_from_row(row) for row in rows]
+        if max_per_symbol is not None and max_per_symbol > 0:
+            sym_counts: dict = {}
+            capped = []
+            for row in result:
+                sym = row.get("symbol") or ""
+                n = sym_counts.get(sym, 0)
+                if n < max_per_symbol:
+                    capped.append(row)
+                    sym_counts[sym] = n + 1
+            return capped
+        return result
 
     def get_option_pool(self, option_pool_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as con:

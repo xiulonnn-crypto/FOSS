@@ -709,7 +709,7 @@ function stateFeaturesHtml(row) {
     <div title="${escapeAttr(title)}" class="flex min-w-[7rem] flex-col items-center gap-1 normal-case">
       ${regimeBadgeHtml(f.regime)}
       <div class="text-[11px] leading-tight text-gray-300">VRP <span class="${Number(f.vrp) > 0 ? 'text-emerald-300' : 'text-gray-300'}">${formatFeaturePct(f.vrp)}</span></div>
-      <div class="text-[11px] leading-tight text-gray-400">RSI ${formatFeatureNumber(f.rsi_14, 0)} · BBZ ${formatFeatureNumber(f.bb_zscore, 1)}</div>
+      <div class="text-[11px] leading-tight text-gray-400">RSI ${formatFeatureNumber(f.rsi_14, 0)} · BBZ ${formatFeatureNumber(f.bb_zscore, 1)}${f.trend_mode === 'STRONG_TREND' ? ' · 趋势↑' : ''}</div>
     </div>`;
 }
 
@@ -948,11 +948,33 @@ function rsiLabel(rsi) {
   return rsi.toFixed(1) + ' ↑↑超买';
 }
 
+function bbZColorClass(bbZ, trendMode) {
+  if (bbZ == null) return 'text-gray-400';
+  if (trendMode === 'STRONG_TREND') {
+    if (bbZ <= -1.5) return 'text-emerald-300 font-semibold';
+    if (bbZ <= -1.0) return 'text-teal-300';
+    if (bbZ <= 0.0) return 'text-indigo-300';
+    if (bbZ <= 0.5) return 'text-sky-300';
+    return 'text-gray-200';
+  }
+  if (bbZ <= -3.0) return 'text-emerald-300 font-semibold';
+  if (bbZ <= -2.0) return 'text-teal-300';
+  if (bbZ <= -1.0) return 'text-sky-300';
+  if (bbZ < 0.0) return 'text-rose-400';
+  return 'text-gray-200';
+}
+
 function entrySignalTimingCardHtml(vol, timing) {
   const rsi14 = timing.rsi_14 != null ? timing.rsi_14 : null;
   const rsi6  = timing.rsi_6  != null ? timing.rsi_6  : null;
   const rsi12 = timing.rsi_12 != null ? timing.rsi_12 : null;
   const bb    = timing.bb_distance_pct;
+  const bbZ   = timing.bb_zscore;
+  const trendMode = timing.trend_mode || 'STANDARD';
+  const isStrong = trendMode === 'STRONG_TREND';
+  const trendBadge = isStrong
+    ? '<span class="rounded bg-violet-700/50 px-1.5 py-0.5 text-[10px] text-violet-200">强趋势</span>'
+    : '<span class="rounded bg-gray-700/50 px-1.5 py-0.5 text-[10px] text-gray-400">标准</span>';
 
   const primaryRsi = rsi14 != null ? rsi14 : rsi6;
   const primaryLabel = rsi14 != null ? 'RSI(14) ★' : (rsi6 != null ? 'RSI(6)' : null);
@@ -966,6 +988,10 @@ function entrySignalTimingCardHtml(vol, timing) {
   rows.push(`<div class="flex justify-between gap-3">
     <span class="text-gray-500">IV Rank</span>
     <span class="text-gray-200 text-right">${vol.iv_rank != null ? fmt(vol.iv_rank, 0) : '-'}</span>
+  </div>`);
+  rows.push(`<div class="flex justify-between gap-3 items-center">
+    <span class="text-gray-500">趋势模式</span>
+    <span class="text-right">${trendBadge}</span>
   </div>`);
 
   if (primaryRsi != null) {
@@ -990,6 +1016,10 @@ function entrySignalTimingCardHtml(vol, timing) {
     <span class="text-gray-500">距布林带下轨</span>
     <span class="${bb != null && bb < 0 ? 'text-rose-400' : bb != null && bb <= 5 ? 'text-teal-300' : 'text-gray-200'} text-right">${bb != null ? bb.toFixed(1) + '%' : '-'}</span>
   </div>`);
+  rows.push(`<div class="flex justify-between gap-3">
+    <span class="text-gray-500">BB Z-score${isStrong ? ' (趋势调整)' : ''}</span>
+    <span class="${bbZColorClass(bbZ, trendMode)} text-right">${bbZ != null ? bbZ.toFixed(2) + 'σ' : '-'}</span>
+  </div>`);
 
   const hint = primaryRsi != null
     ? (primaryRsi <= 35
@@ -998,11 +1028,14 @@ function entrySignalTimingCardHtml(vol, timing) {
           ? '<div class="mt-1.5 text-[10px] text-amber-400/80">超买区间 — 建议等待回落后考虑卖 Put</div>'
           : '')
     : '';
+  const trendHint = isStrong
+    ? '<div class="mt-1 text-[10px] text-violet-400/80">强趋势：回踩中轨即可触发 tier2，≤ -1.5σ 触发 tier3</div>'
+    : '';
 
   return `<div class="rounded border border-gray-700 bg-gray-900/40 p-3">
     <div class="mb-2 text-xs font-semibold text-indigo-200">波动与时机</div>
     <div class="space-y-1 text-xs">${rows.join('') || '<div class="text-gray-500">暂无数据</div>'}</div>
-    ${hint}
+    ${hint}${trendHint}
   </div>`;
 }
 
@@ -1472,8 +1505,8 @@ document.getElementById('btn-reset-pool-filters')?.addEventListener('click', asy
   const maxDteEl = document.getElementById('option-pool-max-dte');
   if (statusEl) statusEl.value = 'NEW,ACTIVE';
   if (qualityEl) qualityEl.value = '';
-  if (entrySignalEl) entrySignalEl.value = 'OPENABLE';
-  if (minScoreEl) minScoreEl.value = '0.7';
+  if (entrySignalEl) entrySignalEl.value = '';
+  if (minScoreEl) minScoreEl.value = '';
   if (minDteEl) minDteEl.value = '';
   if (maxDteEl) maxDteEl.value = '';
   setScreenerScanLoading(true);
@@ -3181,15 +3214,17 @@ function closeAttrDrawer() {
 async function loadAttrDrawerData(positionId) {
   try {
     const body = document.getElementById('attr-drawer-body');
-    const [attrRes, snapRes, diagRes] = await Promise.allSettled([
+    const [attrRes, snapRes, diagRes, candleRes] = await Promise.allSettled([
       apiFetch(`/api/review/positions/${positionId}/attribution`),
       apiFetch(`/api/review/positions/${positionId}/snapshot`),
       apiFetch(`/api/review/positions/${positionId}/diagnosis`),
+      apiFetch(`/api/review/positions/${positionId}/underlying_candles`),
     ]);
     const attr = attrRes.status === 'fulfilled' ? attrRes.value : null;
     const snap = snapRes.status === 'fulfilled' ? snapRes.value : null;
     const diag = diagRes.status === 'fulfilled' ? diagRes.value : null;
-    body.innerHTML = renderAttrDrawer(attr, snap, diag);
+    const candles = candleRes.status === 'fulfilled' ? candleRes.value : null;
+    body.innerHTML = renderAttrDrawer(attr, snap, diag, candles);
   } catch (e) {
     document.getElementById('attr-drawer-body').innerHTML =
       `<div class="text-rose-400 text-sm py-4 text-center">加载失败：${escapeHtml(e.message)}</div>`;
@@ -3284,8 +3319,9 @@ function renderCloseSnapshotCard(snap) {
     </section>`;
 }
 
-function renderAttrDrawer(attr, snap, diag) {
+function renderAttrDrawer(attr, snap, diag, candles) {
   attr = attr || {};
+  const cardCandles = renderUnderlyingCandleCard(candles);
   const cardDiagnosis = renderOrderDiagnosisCard(diag);
   const cardCloseSnap = renderCloseSnapshotCard(snap);
   const snapCardShell =
@@ -3580,7 +3616,154 @@ function renderAttrDrawer(attr, snap, diag) {
       </section>`;
   }
 
-  return `<div class="space-y-4">${cardDiagnosis}${cardPnL}${cardMaeMfe}${cardMassive}${cardSnap}${cardCloseSnap}</div>`;
+  return `<div class="space-y-4">${cardCandles}${cardDiagnosis}${cardPnL}${cardMaeMfe}${cardMassive}${cardSnap}${cardCloseSnap}</div>`;
+}
+
+/**
+ * 标的小时蜡烛图（成交订单详情抽屉顶部）。
+ * 纯 SVG 自绘：等距索引排布蜡烛，叠加入场（绿）/ 出场（红）时间点与对应标的价位置。
+ * @param {object|null} data  - /underlying_candles 返回体
+ */
+function renderUnderlyingCandleCard(data) {
+  const shell = 'rounded-xl border border-gray-700/80 bg-gray-900/90 shadow-sm p-4 space-y-3';
+  const candles = data && Array.isArray(data.candles) ? data.candles : [];
+  if (!data || data.available !== true || candles.length === 0) {
+    const reasonMap = {
+      position_not_closed: '持仓未平仓',
+      no_candles: '该时段无标的历史 K 线（可能过老或行情拉取失败）',
+      missing_dates: '缺少开/平仓时间',
+      error: '行情拉取异常',
+    };
+    const note = (data && reasonMap[data.reason]) || '暂无标的蜡烛数据';
+    return `
+      <section class="${shell}">
+        <h4 class="text-sm font-semibold text-gray-100">标的价格走势</h4>
+        <p class="text-center text-xs text-gray-500 py-6">${escapeHtml(note)}</p>
+      </section>`;
+  }
+
+  const symbol = escapeHtml(String(data.symbol || ''));
+  const intervalLabel = data.interval === '1h' ? '小时线' : '日线';
+  const entry = data.entry || {};
+  const exitM = data.exit || {};
+
+  // ---- 几何参数（固定 viewBox + width:100% 自适应缩放） ----
+  const W = 640, H = 280;
+  const padL = 48, padR = 14, padT = 14, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const n = candles.length;
+  // 价格范围：含所有 OHLC 及入场/出场标的价。
+  let lo = Infinity, hi = -Infinity;
+  for (const c of candles) {
+    if (c.l < lo) lo = c.l;
+    if (c.h > hi) hi = c.h;
+  }
+  [entry.spot, exitM.spot].forEach(v => {
+    if (v != null && Number.isFinite(Number(v))) {
+      const nv = Number(v);
+      if (nv < lo) lo = nv;
+      if (nv > hi) hi = nv;
+    }
+  });
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {
+    const mid = Number.isFinite(lo) ? lo : 1;
+    lo = mid * 0.99; hi = mid * 1.01;
+  }
+  const range = hi - lo;
+  const pad = range * 0.06 || 1;
+  lo -= pad; hi += pad;
+
+  const yOf = price => padT + plotH * (1 - (price - lo) / (hi - lo));
+  const slot = plotW / n;
+  const xCenter = i => padL + slot * (i + 0.5);
+  const bodyW = Math.max(1.5, Math.min(slot * 0.62, 14));
+
+  // ---- 最近柱定位：把入场/出场时间映射到最接近的柱索引 ----
+  const times = candles.map(c => Date.parse(c.t));
+  function nearestIdx(iso) {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return null;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const d = Math.abs(times[i] - t);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  // ---- 蜡烛 ----
+  const candleSvg = candles.map((c, i) => {
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const cx = xCenter(i);
+    const yH = yOf(c.h), yL = yOf(c.l);
+    const yO = yOf(c.o), yC = yOf(c.c);
+    const top = Math.min(yO, yC);
+    const bh = Math.max(1, Math.abs(yC - yO));
+    return `<line x1="${cx.toFixed(1)}" y1="${yH.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yL.toFixed(1)}" stroke="${col}" stroke-width="1"/>`
+      + `<rect x="${(cx - bodyW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bodyW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}"/>`;
+  }).join('');
+
+  // ---- Y 轴价格刻度（4 档） ----
+  const ticks = 4;
+  let axisSvg = '';
+  for (let k = 0; k <= ticks; k++) {
+    const price = lo + (hi - lo) * (k / ticks);
+    const y = yOf(price);
+    axisSvg += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#374151" stroke-width="0.5" stroke-dasharray="2 3"/>`
+      + `<text x="${(padL - 5).toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#9ca3af">${price.toFixed(2)}</text>`;
+  }
+
+  // ---- 入场 / 出场标记 ----
+  function marker(iso, spot, color, label) {
+    const idx = nearestIdx(iso);
+    if (idx == null) return '';
+    const x = xCenter(idx);
+    const yPrice = spot != null && Number.isFinite(Number(spot)) ? yOf(Number(spot)) : null;
+    let s = `<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT + plotH).toFixed(1)}" stroke="${color}" stroke-width="1" stroke-dasharray="3 3" opacity="0.8"/>`;
+    if (yPrice != null) {
+      s += `<circle cx="${x.toFixed(1)}" cy="${yPrice.toFixed(1)}" r="3.5" fill="${color}" stroke="#0b0f17" stroke-width="1"/>`;
+      // 价格标签，避开左右边界
+      const anchor = x > W - padR - 50 ? 'end' : 'start';
+      const dx = anchor === 'end' ? -6 : 6;
+      s += `<text x="${(x + dx).toFixed(1)}" y="${(yPrice - 6).toFixed(1)}" text-anchor="${anchor}" font-size="9" font-weight="600" fill="${color}">${label} $${Number(spot).toFixed(2)}</text>`;
+    }
+    return s;
+  }
+  const entrySvg = marker(entry.t, entry.spot, '#34d399', '入场');
+  const exitSvg = marker(exitM.t, exitM.spot, '#f87171', '出场');
+
+  // ---- X 轴首尾日期 ----
+  const fmtDay = iso => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+  const xAxisSvg =
+    `<text x="${padL}" y="${(H - 8).toFixed(1)}" text-anchor="start" font-size="9" fill="#6b7280">${fmtDay(candles[0].t)}</text>`
+    + `<text x="${(W - padR).toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="end" font-size="9" fill="#6b7280">${fmtDay(candles[n - 1].t)}</text>`;
+
+  const legend = `
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
+      <span class="inline-flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full" style="background:#34d399"></span>入场 ${entry.spot != null ? '$' + Number(entry.spot).toFixed(2) : '—'}</span>
+      <span class="inline-flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full" style="background:#f87171"></span>出场 ${exitM.spot != null ? '$' + Number(exitM.spot).toFixed(2) : '—'}</span>
+    </div>`;
+
+  return `
+    <section class="${shell}">
+      <div class="flex items-baseline justify-between gap-2">
+        <h4 class="text-sm font-semibold text-gray-100">标的价格走势 · ${symbol}</h4>
+        <span class="text-xs text-gray-500">${intervalLabel} · ${n} 根</span>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" class="w-full" style="height:auto" role="img" aria-label="${symbol} 标的蜡烛图">
+        ${axisSvg}${candleSvg}${entrySvg}${exitSvg}${xAxisSvg}
+      </svg>
+      ${legend}
+      <p class="text-xs text-gray-500 leading-snug">虚线为入场/出场时刻，圆点为对应标的价位置；蜡烛取自 yfinance 历史行情。</p>
+    </section>`;
 }
 
 // ================================================================

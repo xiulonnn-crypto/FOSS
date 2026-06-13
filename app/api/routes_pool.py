@@ -191,8 +191,11 @@ def list_pool_options():
 
 def _query_option_pool(repo: Repo, args) -> List[Dict[str, Any]]:
     """Shared option-pool query (used by /pool/options and /screener/marks)."""
+    symbol = args.get("symbol") or None
+    # 单标的精确查询时不限条数；多标的全局视图每标的最多 10 条（按评分取 Top 10）
+    max_per_symbol = None if symbol else _int_or_none(args.get("max_per_symbol")) or 10
     return repo.list_option_pool(
-        symbol=args.get("symbol") or None,
+        symbol=symbol,
         status=args.get("status", "NEW,ACTIVE"),
         quality_grade=args.get("quality_grade") or None,
         min_score=_float_or_none(args.get("min_score")),
@@ -200,6 +203,7 @@ def _query_option_pool(repo: Repo, args) -> List[Dict[str, Any]]:
         max_dte=_int_or_none(args.get("max_dte")),
         entry_signal_status=args.get("entry_signal_status") or None,
         min_entry_signal_score=_int_or_none(args.get("min_entry_signal_score")),
+        max_per_symbol=max_per_symbol,
     )
 
 

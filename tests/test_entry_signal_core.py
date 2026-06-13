@@ -114,10 +114,11 @@ def test_entry_signal_promotes_state_features_into_timing_metrics():
     assert timing["rsi_14"] == 28.5
     assert timing["bb_distance_pct"] == -1.2
 
-    # Timing reasons (oversold / below-band) should also fire from state_features.
+    # Timing reasons (oversold / below-band / prime entry) fire from state_features.
     codes = {r["code"] for r in signal["reasons"]}
     assert "timing_oversold" in codes
     assert "timing_below_lower_band" in codes
+    assert "timing_prime_entry" in codes
 
 
 def test_entry_signal_state_features_does_not_override_explicit_top_level():
@@ -148,3 +149,102 @@ def test_entry_signal_accepts_state_features_json_string():
     timing = signal["metrics"]["timing"]
     assert timing["rsi_14"] == 33.0
     assert timing["bb_distance_pct"] == 4.5
+
+
+def test_entry_signal_prime_entry_tier2_reason_and_decision_bonus():
+    base = build_entry_signal(_pool_row(), today=date.today())
+    prime = build_entry_signal(
+        _pool_row(
+            state_features={
+                "bb_zscore": -2.2,
+                "bb_lower_distance_pct": -0.5,
+                "rsi_14": 40.0,
+            }
+        ),
+        settings={"filters": {"iv_rank_min": 50}},
+        today=date.today(),
+    )
+    codes = {r["code"] for r in prime["reasons"]}
+    assert "timing_prime_entry" in codes
+    assert prime["decision_score"] >= base["decision_score"] + 8
+    assert prime["metrics"]["timing"]["bb_zscore"] == -2.2
+
+
+def test_entry_signal_prime_entry_extreme_with_minus3_sigma():
+    signal = build_entry_signal(
+        _pool_row(
+            state_features={
+                "bb_zscore": -3.1,
+                "rsi_14": 38.0,
+            }
+        ),
+        settings={"filters": {"iv_rank_min": 50}},
+        today=date.today(),
+    )
+    codes = {r["code"] for r in signal["reasons"]}
+    assert "timing_prime_entry_extreme" in codes
+
+
+def test_entry_signal_strong_trend_tier2_on_near_midline():
+    signal = build_entry_signal(
+        _pool_row(
+            state_features={
+                "bb_zscore": -0.1,
+                "trend_mode": "STRONG_TREND",
+                "rsi_14": 45.0,
+            }
+        ),
+        settings={"filters": {"iv_rank_min": 50}},
+        today=date.today(),
+    )
+    codes = {r["code"] for r in signal["reasons"]}
+    assert "timing_prime_entry" in codes
+
+
+def test_entry_signal_strong_trend_exempts_below_band_warn():
+    signal = build_entry_signal(
+        _pool_row(
+            state_features={
+                "bb_zscore": -0.5,
+                "bb_lower_distance_pct": -1.2,
+                "trend_mode": "STRONG_TREND",
+                "rsi_14": 45.0,
+            }
+        ),
+        settings={"filters": {"iv_rank_min": 50}},
+        today=date.today(),
+    )
+    codes = {r["code"] for r in signal["reasons"]}
+    assert "timing_below_lower_band" not in codes
+
+
+def test_entry_signal_strong_trend_overbought_forces_wait():
+    signal = build_entry_signal(
+        _pool_row(
+            state_features={
+                "trend_mode": "STRONG_TREND",
+                "rsi_14": 72.0,
+            }
+        ),
+        today=date.today(),
+    )
+    assert signal["decision_score"] >= 60
+    assert signal["status"] == "WAIT"
+
+
+def test_entry_signal_tier1_standard_adds_small_prime_bonus():
+    base = build_entry_signal(_pool_row(), today=date.today())
+    tier1 = build_entry_signal(
+        _pool_row(
+            state_features={
+                "bb_zscore": -1.5,
+                "trend_mode": "STANDARD",
+                "rsi_14": 45.0,
+            }
+        ),
+        settings={"filters": {"iv_rank_min": 50}},
+        today=date.today(),
+    )
+    codes = {r["code"] for r in tier1["reasons"]}
+    assert "timing_bb_pullback" in codes
+    assert tier1["decision_score"] >= base["decision_score"] + 3

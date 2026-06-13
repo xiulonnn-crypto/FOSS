@@ -418,7 +418,7 @@ sequenceDiagram
 
 **IV Rank（RV 代理）**：用过去 252 日对数收益标准差年化得 RV；将当前 ATM IV（或合约 IV）与 RV 分位数映射到 0–100（实施阶段给出精确公式与边界处理）。
 
-### 7.2 综合评分（加权线性）
+### 7.2 综合评分（加权线性 + 事件驱动加成）
 
 权重存 `settings.scoring_weights`，默认：
 
@@ -427,8 +427,15 @@ sequenceDiagram
 - `spread_pct` 0.15（价差越小越好，取反归一）  
 - `margin_buffer` 0.15  
 - `open_interest` 0.10  
+- `dip_event` 0.10（**事件驱动加成**，见下）
 
-每项 `normalize(x, lo, hi)` 截断到 \[0,1\]，再线性组合为 `score`；结果表按 `score DESC`，默认展示 Top 20。
+每项 `normalize(x, lo, hi)` 截断到 \[0,1\]，再线性组合为 `base score`；结果表按 `score DESC`，默认展示 Top 20。
+
+**事件驱动 dip 加成**（`core/features.detect_dip_event`）：当标的 `bb_zscore ≤ -2σ`（强）或 `≤ -3σ`（极端）且 `iv_rank ≥ iv_rank_min` 时，在 `base` 上叠加 `dip_event` 权重（tier 2 → +0.10，tier 3 → +0.15），最终 `score = min(1.0, base + bonus)`。RSI(14) 作辅证：`≥ 60` 抑制事件；`≤ 35` 可将强档升为极端档。候选行写入 `dip_tier`（0/2/3）便于排查。
+
+**入场决策卡**（`entry_signal_v1`）：同一事件在 `decision_score` 上额外 +8（tier 2）或 +12（tier 3），并生成 `timing_prime_entry` / `timing_prime_entry_extreme` 理由码。
+
+可选阈值覆盖见 `settings.entry_signal`：`bb_sigma_strong`（-2.0）、`bb_sigma_extreme`（-3.0）、`rsi_oversold`（35）、`rsi_suppress`（60）。
 
 ### 7.3 出场信号（雷达）
 
@@ -474,7 +481,14 @@ sequenceDiagram
     "iv_rank": 0.25,
     "spread_pct": 0.15,
     "margin_buffer": 0.15,
-    "open_interest": 0.1
+    "open_interest": 0.1,
+    "dip_event": 0.1
+  },
+  "entry_signal": {
+    "bb_sigma_strong": -2.0,
+    "bb_sigma_extreme": -3.0,
+    "rsi_oversold": 35,
+    "rsi_suppress": 60
   },
   "schedule": {
     "screener_minutes": 15,

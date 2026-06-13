@@ -1472,8 +1472,8 @@ document.getElementById('btn-reset-pool-filters')?.addEventListener('click', asy
   const maxDteEl = document.getElementById('option-pool-max-dte');
   if (statusEl) statusEl.value = 'NEW,ACTIVE';
   if (qualityEl) qualityEl.value = '';
-  if (entrySignalEl) entrySignalEl.value = 'OPENABLE';
-  if (minScoreEl) minScoreEl.value = '0.7';
+  if (entrySignalEl) entrySignalEl.value = '';
+  if (minScoreEl) minScoreEl.value = '';
   if (minDteEl) minDteEl.value = '';
   if (maxDteEl) maxDteEl.value = '';
   setScreenerScanLoading(true);
